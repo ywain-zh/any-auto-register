@@ -122,6 +122,82 @@ git merge custom/dev
 3. 推送到你的 fork：`origin/release`
 4. 服务器只拉 `release`
 
+## Docker Deployment
+
+推荐服务器直接通过 `docker compose` 部署 `release` 分支。
+
+### 1. 推送发布分支
+
+本地完成验证后：
+
+```bash
+git checkout custom/dev
+git push -u origin custom/dev
+
+git checkout release
+git push -u origin release
+```
+
+### 2. 服务器首次部署
+
+```bash
+git clone https://github.com/ywain-zh/any-auto-register.git
+cd any-auto-register
+git checkout release
+mkdir -p data _ext_targets external_logs
+docker compose up -d --build
+```
+
+### 3. 服务器后续更新
+
+```bash
+cd any-auto-register
+git fetch origin
+git checkout release
+git pull origin release
+docker compose up -d --build
+```
+
+### 4. 默认端口
+
+- 主服务：`8000`
+- Solver：`8889`（默认仅绑定服务器本机）
+- CLIProxyAPI：`8317`
+- grok2api：`8011`
+
+### 5. 数据持久化目录
+
+`docker-compose.yml` 默认会把这些目录挂载到宿主机：
+
+- `./data`
+- `./_ext_targets`
+- `./external_logs`
+
+其中最重要的是 `./data`，它会保存：
+
+- `account_manager.db`
+- solver 日志
+- SMSToMe 相关数据
+
+### 6. 部署后访问
+
+```text
+http://服务器IP:8000
+```
+
+如果前面接 Nginx / Caddy，则把外部域名反向代理到容器的 `8000`。
+
+### 7. 首次部署后需要检查的配置
+
+进入页面后，优先确认这些全局配置：
+
+- `YesCaptcha`
+- `Cloud Mail`
+- `CPA API`
+- 默认执行器 / 默认验证码服务
+
+如果服务器也要直接使用当前 Cloud Mail 实例，确认 `邮箱服务` 列表里的实例配置已经存在。
+
 ## Push Strategy
 
 ### 推送开发分支
