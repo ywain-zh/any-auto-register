@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { App, Card, Form, Input, Select, Button, message, Tabs, Space, Tag, Typography, Modal, QRCode, Switch } from 'antd'
+import { App, Card, Form, Input, Select, Button, message, Tabs, Space, Tag, Typography, Modal, QRCode, Switch, List, Popconfirm } from 'antd'
 import {
   SaveOutlined,
   EyeOutlined,
@@ -12,6 +12,8 @@ import {
   SyncOutlined,
   PlusOutlined,
   LockOutlined,
+  EditOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import { parseBooleanConfigValue } from '@/lib/configValueParsers'
 import { apiFetch } from '@/lib/utils'
@@ -21,6 +23,7 @@ const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
     { label: 'LuckMail（订单接码 / 已购邮箱）', value: 'luckmail' },
     { label: 'Laoudo（固定邮箱）', value: 'laoudo' },
     { label: 'TempMail.lol（自动生成）', value: 'tempmail_lol' },
+    { label: 'Cloud Mail（自建平台）', value: 'cloudmail' },
     { label: 'SkyMail（CloudMail 接口）', value: 'skymail' },
     { label: 'DuckMail（自动生成）', value: 'duckmail' },
     { label: 'MoeMail (sall.cc)', value: 'moemail' },
@@ -78,72 +81,9 @@ const TAB_ITEMS = [
         fields: [{ key: 'mail_provider', label: '邮箱服务', type: 'select' }],
       },
       {
-        title: 'Laoudo',
-        desc: '固定邮箱，手动配置',
-        fields: [
-          { key: 'laoudo_email', label: '邮箱地址', placeholder: 'xxx@laoudo.com' },
-          { key: 'laoudo_account_id', label: 'Account ID', placeholder: '563' },
-          { key: 'laoudo_auth', label: 'JWT Token', placeholder: 'eyJ...', secret: true },
-        ],
-      },
-      {
-        title: 'Freemail',
-        desc: '基于 Cloudflare Worker 的自建邮箱，支持管理员令牌或账号密码认证',
-        fields: [
-          { key: 'freemail_api_url', label: 'API URL', placeholder: 'https://mail.example.com' },
-          { key: 'freemail_admin_token', label: '管理员令牌', secret: true },
-          { key: 'freemail_username', label: '用户名（可选）' },
-          { key: 'freemail_password', label: '密码（可选）', secret: true },
-        ],
-      },
-      {
-        title: 'MoeMail',
-        desc: '自动注册账号并生成临时邮箱',
-        fields: [{ key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' }],
-      },
-      {
-        title: 'SkyMail',
-        desc: 'CloudMail 兼容接口（addUser / emailList）',
-        fields: [
-          { key: 'skymail_api_base', label: 'API Base', placeholder: 'https://api.skymail.ink' },
-          { key: 'skymail_token', label: 'Authorization Token', secret: true },
-          { key: 'skymail_domain', label: '邮箱域名', placeholder: 'mail.example.com' },
-        ],
-      },
-      {
-        title: 'YYDS Mail / MaliAPI',
-        desc: '基于 API Key 创建临时邮箱并轮询收件箱消息',
-        fields: [
-          { key: 'maliapi_base_url', label: 'API URL', placeholder: 'https://maliapi.215.im/v1' },
-          { key: 'maliapi_api_key', label: 'API Key', secret: true },
-          { key: 'maliapi_domain', label: '邮箱域名（可选）', placeholder: 'example.com' },
-          { key: 'maliapi_auto_domain_strategy', label: '自动域名策略', type: 'select' },
-        ],
-      },
-      {
-        title: 'GPTMail',
-        desc: '基于 GPTMail API 生成临时邮箱并轮询邮件；若已知本站可用域名，也可本地拼装随机地址',
-        fields: [
-          { key: 'gptmail_base_url', label: 'API URL', placeholder: 'https://mail.chatgpt.org.uk' },
-          { key: 'gptmail_api_key', label: 'API Key', secret: true, placeholder: 'gpt-test' },
-          { key: 'gptmail_domain', label: '邮箱域名（可选）', placeholder: 'example.com' },
-        ],
-      },
-      {
         title: 'TempMail.lol',
         desc: '自动生成邮箱，无需配置，需要代理访问（CN IP 被封）',
         fields: [],
-      },
-      {
-        title: 'DuckMail',
-        desc: '自动生成邮箱，随机创建账号',
-        fields: [
-          { key: 'duckmail_api_url', label: 'Web URL', placeholder: 'https://www.duckmail.sbs' },
-          { key: 'duckmail_provider_url', label: 'Provider URL', placeholder: 'https://api.duckmail.sbs' },
-          { key: 'duckmail_bearer', label: 'Bearer Token', placeholder: 'kevin273945', secret: true },
-          { key: 'duckmail_domain', label: '自定义域名', placeholder: '留空则从 Provider URL 推导' },
-          { key: 'duckmail_api_key', label: 'API Key（私有域名）', placeholder: 'dk_xxx（domain.duckmail.sbs 获取）', secret: true },
-        ],
       },
       {
         title: 'CF Worker 自建邮箱',
@@ -155,16 +95,6 @@ const TAB_ITEMS = [
           { key: 'cfworker_subdomain', label: '固定子域名', placeholder: 'mail / pool-a' },
           { key: 'cfworker_random_subdomain', label: '随机子域名', type: 'boolean' },
           { key: 'cfworker_fingerprint', label: 'Fingerprint', placeholder: '6703363b...' },
-        ],
-      },
-      {
-        title: 'LuckMail',
-        desc: 'ChatGPT 走购买邮箱，其他平台继续走订单接码老逻辑',
-        fields: [
-          { key: 'luckmail_base_url', label: '平台地址', placeholder: 'https://mails.luckyous.com' },
-          { key: 'luckmail_api_key', label: 'API Key', secret: true },
-          { key: 'luckmail_email_type', label: '邮箱类型（可选）', placeholder: 'ms_graph / ms_imap / self_built' },
-          { key: 'luckmail_domain', label: '邮箱域名（可选）', placeholder: 'outlook.com / gmail.com' },
         ],
       },
     ],
@@ -337,6 +267,88 @@ interface TabConfig {
   sections: SectionConfig[]
 }
 
+interface MailboxServiceItem {
+  id: number | string
+  name: string
+  provider: string
+  config: Record<string, string>
+  is_active: boolean
+}
+
+const BUILTIN_MAILBOX_SERVICES: MailboxServiceItem[] = [
+  {
+    id: 'builtin:tempmail_lol',
+    name: 'TempMail.lol（自动生成）',
+    provider: 'tempmail_lol',
+    config: {},
+    is_active: true,
+  },
+]
+
+const MAILBOX_PROVIDER_OPTIONS = [
+  { label: 'Cloud Mail', value: 'cloudmail' },
+  { label: 'SkyMail', value: 'skymail' },
+  { label: 'DuckMail', value: 'duckmail' },
+  { label: 'GPTMail', value: 'gptmail' },
+  { label: 'YYDS Mail / MaliAPI', value: 'maliapi' },
+  { label: 'Freemail', value: 'freemail' },
+  { label: 'Laoudo', value: 'laoudo' },
+  { label: 'MoeMail', value: 'moemail' },
+  { label: 'LuckMail', value: 'luckmail' },
+]
+
+const MAILBOX_PROVIDER_FIELDS: Record<string, FieldConfig[]> = {
+  cloudmail: [
+    { key: 'cloudmail_api_url', label: 'API URL', placeholder: 'https://mail.example.com' },
+    { key: 'cloudmail_admin_email', label: '管理员邮箱', placeholder: 'admin@example.com' },
+    { key: 'cloudmail_admin_password', label: '管理员密码', secret: true },
+    { key: 'cloudmail_domains', label: '邮箱域名列表', placeholder: 'goodfine.ccwu.cc\nexample.com\n或用英文逗号分隔' },
+  ],
+  skymail: [
+    { key: 'skymail_api_base', label: 'Base URL', placeholder: 'https://mail.example.com' },
+    { key: 'skymail_token', label: 'Authorization Token', secret: true },
+    { key: 'skymail_domain', label: '邮箱域名', placeholder: 'mail.example.com' },
+  ],
+  duckmail: [
+    { key: 'duckmail_api_url', label: 'Web URL', placeholder: 'https://www.duckmail.sbs' },
+    { key: 'duckmail_provider_url', label: 'Provider URL', placeholder: 'https://api.duckmail.sbs' },
+    { key: 'duckmail_bearer', label: 'Bearer Token', secret: true },
+    { key: 'duckmail_domain', label: '自定义域名', placeholder: '留空则从 Provider URL 推导' },
+    { key: 'duckmail_api_key', label: 'API Key（私有域名）', secret: true },
+  ],
+  gptmail: [
+    { key: 'gptmail_base_url', label: 'API URL', placeholder: 'https://mail.chatgpt.org.uk' },
+    { key: 'gptmail_api_key', label: 'API Key', secret: true },
+    { key: 'gptmail_domain', label: '邮箱域名（可选）', placeholder: 'example.com' },
+  ],
+  maliapi: [
+    { key: 'maliapi_base_url', label: 'API URL', placeholder: 'https://maliapi.215.im/v1' },
+    { key: 'maliapi_api_key', label: 'API Key', secret: true },
+    { key: 'maliapi_domain', label: '邮箱域名（可选）', placeholder: 'example.com' },
+    { key: 'maliapi_auto_domain_strategy', label: '自动域名策略', type: 'select' },
+  ],
+  freemail: [
+    { key: 'freemail_api_url', label: 'API URL', placeholder: 'https://mail.example.com' },
+    { key: 'freemail_admin_token', label: '管理员令牌', secret: true },
+    { key: 'freemail_username', label: '用户名（可选）' },
+    { key: 'freemail_password', label: '密码（可选）', secret: true },
+  ],
+  laoudo: [
+    { key: 'laoudo_email', label: '邮箱地址', placeholder: 'xxx@laoudo.com' },
+    { key: 'laoudo_account_id', label: 'Account ID', placeholder: '563' },
+    { key: 'laoudo_auth', label: 'JWT Token', secret: true },
+  ],
+  moemail: [
+    { key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' },
+  ],
+  luckmail: [
+    { key: 'luckmail_base_url', label: '平台地址', placeholder: 'https://mails.luckyous.com' },
+    { key: 'luckmail_api_key', label: 'API Key', secret: true },
+    { key: 'luckmail_email_type', label: '邮箱类型（可选）', placeholder: 'ms_graph / ms_imap / self_built' },
+    { key: 'luckmail_domain', label: '邮箱域名（可选）', placeholder: 'outlook.com / gmail.com' },
+  ],
+}
+
 function formatResultText(data: unknown) {
   if (typeof data === 'string') return data
   try {
@@ -427,130 +439,172 @@ function ConfigSection({ section }: { section: SectionConfig }) {
   )
 }
 
-function CFWorkerDomainPoolSection({ form }: { form: any }) {
-  const watchedDomains = Form.useWatch('cfworker_domains', form) || []
-  const watchedEnabledDomains = Form.useWatch('cfworker_enabled_domains', form) || []
-  const normalizedDomains = normalizeDomainList(watchedDomains)
-  const enabledDomains = normalizeDomainList(watchedEnabledDomains).filter((domain) => normalizedDomains.includes(domain))
+function MailboxServiceModalFields({ provider }: { provider: string }) {
+  const fields = MAILBOX_PROVIDER_FIELDS[provider] || []
+  return (
+    <>
+      {fields.map((field) => (
+        <ConfigField key={field.key} field={field} />
+      ))}
+    </>
+  )
+}
 
-  const updateEnabledDomains = (nextDomains: string[]) => {
-    form.setFieldValue('cfworker_enabled_domains', normalizeDomainList(nextDomains))
+function MailboxServicesPanel() {
+  const [items, setItems] = useState<MailboxServiceItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState<MailboxServiceItem | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [form] = Form.useForm()
+  const provider = Form.useWatch('provider', form)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const result = await apiFetch('/mailboxes') as MailboxServiceItem[]
+      setItems([...BUILTIN_MAILBOX_SERVICES, ...(result || [])])
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const toggleEnabledDomain = (domain: string, checked: boolean) => {
-    if (checked) {
-      updateEnabledDomains([...enabledDomains, domain])
-      return
+  useEffect(() => {
+    load()
+  }, [])
+
+  const openCreate = () => {
+    setEditingItem(null)
+    form.resetFields()
+    form.setFieldsValue({ provider: 'cloudmail' })
+    setModalOpen(true)
+  }
+
+  const openEdit = (item: MailboxServiceItem) => {
+    setEditingItem(item)
+    form.resetFields()
+    form.setFieldsValue({ name: item.name, provider: item.provider, ...(item.config || {}) })
+    setModalOpen(true)
+  }
+
+  const handleDelete = async (item: MailboxServiceItem) => {
+    await apiFetch(`/mailboxes/${item.id}`, { method: 'DELETE' })
+    message.success('邮箱服务已删除')
+    load()
+  }
+
+  const handleToggle = async (item: MailboxServiceItem) => {
+    await apiFetch(`/mailboxes/${item.id}/toggle`, { method: 'PATCH' })
+    message.success(item.is_active ? '已停用邮箱服务' : '已启用邮箱服务')
+    load()
+  }
+
+  const handleSave = async () => {
+    const values = await form.validateFields()
+    const nextProvider = values.provider
+    const fields = MAILBOX_PROVIDER_FIELDS[nextProvider] || []
+    const config = Object.fromEntries(fields.map((field) => [field.key, values[field.key] || '']))
+
+    setSaving(true)
+    try {
+      if (editingItem) {
+        await apiFetch(`/mailboxes/${editingItem.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            name: values.name,
+            provider: nextProvider,
+            config,
+            is_active: editingItem.is_active,
+          }),
+        })
+        message.success('邮箱服务已更新')
+      } else {
+        await apiFetch('/mailboxes', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: values.name,
+            provider: nextProvider,
+            config,
+          }),
+        })
+        message.success('邮箱服务已新增')
+      }
+      setModalOpen(false)
+      form.resetFields()
+      load()
+    } finally {
+      setSaving(false)
     }
-    updateEnabledDomains(enabledDomains.filter((item) => item !== domain))
   }
 
   return (
-    <Card
-      title="CF Worker 域名池"
-      extra={<span style={{ fontSize: 12, color: '#7a8ba3' }}>注册时会从已启用域名中随机选择一个</span>}
-      style={{ marginBottom: 16 }}
-    >
-      <Form.List name="cfworker_domains">
-        {(fields, { add, remove }) => (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {fields.map((field) => (
-              <Space key={field.key} align="start" style={{ display: 'flex' }}>
-                <Form.Item
-                  {...field}
-                  label={field.name === 0 ? '全部域名' : ''}
-                  style={{ flex: 1, marginBottom: 0 }}
-                  rules={[
-                    {
-                      validator: async (_, value) => {
-                        if (!String(value || '').trim()) {
-                          throw new Error('请输入域名')
-                        }
-                      },
-                    },
-                  ]}
-                >
-                  <Input placeholder="example.com" />
-                </Form.Item>
-                <Button
-                  danger
-                  onClick={() => {
-                    const currentDomains = Array.isArray(form.getFieldValue('cfworker_domains'))
-                      ? [...form.getFieldValue('cfworker_domains')]
-                      : []
-                    const removedDomain = String(currentDomains[field.name] || '').trim().toLowerCase().replace(/^@/, '')
-                    remove(field.name)
-                    if (!removedDomain) return
-                    const enabledDomains = normalizeDomainList(form.getFieldValue('cfworker_enabled_domains'))
-                    form.setFieldValue(
-                      'cfworker_enabled_domains',
-                      enabledDomains.filter((domain) => domain !== removedDomain),
-                    )
-                  }}
-                >
-                  删除
-                </Button>
-              </Space>
-            ))}
-            {fields.length === 0 ? (
-              <Typography.Text type="secondary">还没有配置域名。添加后即可在下方选择启用项。</Typography.Text>
-            ) : null}
-            <Button type="dashed" onClick={() => add('')} icon={<PlusOutlined />} block>
-              添加域名
-            </Button>
-          </div>
-        )}
-      </Form.List>
-
-      <Form.Item name="cfworker_enabled_domains" hidden>
-        <Select mode="multiple" options={normalizedDomains.map((domain) => ({ label: domain, value: domain }))} />
-      </Form.Item>
-
-      <div style={{ marginTop: 16 }}>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>已启用域名</div>
-        {enabledDomains.length > 0 ? (
-          <Space wrap>
-            {enabledDomains.map((domain) => (
-              <Tag
-                key={domain}
-                color="blue"
-                closable
-                onClose={(event) => {
-                  event.preventDefault()
-                  updateEnabledDomains(enabledDomains.filter((item) => item !== domain))
-                }}
+    <>
+      <Card
+        title="邮箱服务列表"
+        extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增邮箱服务</Button>}
+      >
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          这里维护可选的邮箱服务实例。TempMail.lol 为系统内置项，固定可用且不可编辑。
+        </Typography.Paragraph>
+        <List
+          loading={loading}
+          dataSource={items}
+          renderItem={(item) => {
+            const builtin = String(item.id).startsWith('builtin:')
+            return (
+              <List.Item
+                actions={builtin ? [] : [
+                  <Button key="edit" type="text" icon={<EditOutlined />} onClick={() => openEdit(item)} />,
+                  <Button key="toggle" type="text" onClick={() => handleToggle(item)}>{item.is_active ? '停用' : '启用'}</Button>,
+                  <Popconfirm key="delete" title="确认删除这个邮箱服务？" onConfirm={() => handleDelete(item)}>
+                    <Button type="text" danger icon={<DeleteOutlined />} />
+                  </Popconfirm>,
+                ]}
               >
-                {domain}
-              </Tag>
-            ))}
-          </Space>
-        ) : (
-          <Typography.Text type="secondary">暂无启用域名，点击下方域名即可启用。</Typography.Text>
-        )}
-      </div>
+                <List.Item.Meta
+                  title={
+                    <Space>
+                      <span>{item.name}</span>
+                      <Tag color={builtin ? 'blue' : item.is_active ? 'green' : 'default'}>
+                        {builtin ? '系统内置' : item.is_active ? '已启用' : '已停用'}
+                      </Tag>
+                      <Tag>{item.provider}</Tag>
+                    </Space>
+                  }
+                  description={
+                    <Typography.Text type="secondary">
+                      {(MAILBOX_PROVIDER_FIELDS[item.provider] || [])
+                        .map((field) => `${field.label}: ${item.config?.[field.key] ? '已配置' : '未配置'}`)
+                        .join(' · ') || '无需额外配置'}
+                    </Typography.Text>
+                  }
+                />
+              </List.Item>
+            )
+          }}
+        />
+      </Card>
 
-      <div style={{ marginTop: 16 }}>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>点击切换启用状态</div>
-        {normalizedDomains.length > 0 ? (
-          <Space wrap>
-            {normalizedDomains.map((domain) => (
-              <Tag.CheckableTag
-                key={domain}
-                checked={enabledDomains.includes(domain)}
-                onChange={(checked) => toggleEnabledDomain(domain, checked)}
-              >
-                {domain}
-              </Tag.CheckableTag>
-            ))}
-          </Space>
-        ) : (
-          <Typography.Text type="secondary">请先在上方添加域名。</Typography.Text>
-        )}
-      </div>
-      <Typography.Text type="secondary" style={{ display: 'block', marginTop: 12 }}>
-        仅已启用域名会参与注册；点击已启用标签可直接移除。
-      </Typography.Text>
-    </Card>
+      <Modal
+        open={modalOpen}
+        title={editingItem ? '编辑邮箱服务' : '新增邮箱服务'}
+        onCancel={() => setModalOpen(false)}
+        onOk={handleSave}
+        okText={editingItem ? '保存修改' : '创建服务'}
+        confirmLoading={saving}
+        destroyOnHidden
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item name="name" label="显示名称" rules={[{ required: true, message: '请输入显示名称' }]}>
+            <Input placeholder="例如：Cloud Mail 主站" />
+          </Form.Item>
+          <Form.Item name="provider" label="邮箱服务类型" rules={[{ required: true, message: '请选择邮箱服务类型' }]}>
+            <Select options={MAILBOX_PROVIDER_OPTIONS} />
+          </Form.Item>
+          <MailboxServiceModalFields provider={provider} />
+        </Form>
+      </Modal>
+    </>
   )
 }
 
@@ -1129,6 +1183,8 @@ export default function Settings() {
         <div style={{ flex: 1 }}>
           {activeTab === 'integrations' ? (
             <IntegrationsPanel />
+          ) : activeTab === 'mailbox' ? (
+            <MailboxServicesPanel />
           ) : activeTab === 'security' ? (
             <SecurityPanel />
           ) : (
@@ -1137,7 +1193,6 @@ export default function Settings() {
               {currentTab.sections.map((section) => (
                 <ConfigSection key={section.title} section={section} />
               ))}
-              {activeTab === 'mailbox' ? <CFWorkerDomainPoolSection form={form} /> : null}
               <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving} block>
                 {saved ? '已保存 ✓' : '保存配置'}
               </Button>

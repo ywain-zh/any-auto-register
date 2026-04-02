@@ -47,6 +47,17 @@ const STATUS_COLORS: Record<string, string> = {
   invalid: 'error',
 }
 
+interface MailboxServiceItem {
+  id: number | string
+  name: string
+  provider: string
+  is_active: boolean
+}
+
+const BUILTIN_MAILBOX_SERVICES: MailboxServiceItem[] = [
+  { id: 'builtin:tempmail_lol', name: 'TempMail.lol（自动生成）', provider: 'tempmail_lol', is_active: true },
+]
+
 function parseExtraJson(raw: string | undefined) {
   if (!raw) return {}
   try {
@@ -488,6 +499,7 @@ export default function Accounts() {
   const [platformActions, setPlatformActions] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [mailboxServices, setMailboxServices] = useState<MailboxServiceItem[]>([])
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
@@ -545,6 +557,17 @@ export default function Accounts() {
       .then((data) => setPlatformActions(data.actions || []))
       .catch(() => setPlatformActions([]))
   }, [currentPlatform])
+
+  useEffect(() => {
+    apiFetch('/mailboxes')
+      .then((items) => {
+        setMailboxServices([
+          ...BUILTIN_MAILBOX_SERVICES,
+          ...((items as MailboxServiceItem[]).filter((item) => item.is_active)),
+        ])
+      })
+      .catch(() => setMailboxServices(BUILTIN_MAILBOX_SERVICES))
+  }, [])
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -628,6 +651,7 @@ export default function Accounts() {
       const cfg = await apiFetch('/config')
       const executorType = normalizeExecutorForPlatform(currentPlatform, cfg.default_executor)
       const registerExtra = {
+        mailbox_service_id: values.mailbox_service_id,
         mail_provider: cfg.mail_provider || 'luckmail',
         laoudo_auth: cfg.laoudo_auth,
         laoudo_email: cfg.laoudo_email,
@@ -1227,10 +1251,20 @@ export default function Accounts() {
       >
         {!taskId ? (
           <Form form={registerForm} layout="vertical" onFinish={handleRegister}>
-            <Form.Item name="count" label="注册数量" initialValue={1} rules={[{ required: true }]}>
+            <Form.Item name="count" label="注册数量" initialValue={1} rules={[{ required: true }]}> 
               <Input type="number" min={1} />
             </Form.Item>
-            <Form.Item name="concurrency" label="并发数" initialValue={1} rules={[{ required: true }]}>
+            <Form.Item name="mailbox_service_id" label="邮箱服务实例">
+              <Select
+                allowClear
+                placeholder="选择已配置的邮箱服务实例"
+                options={mailboxServices.map((item) => ({
+                  value: item.id,
+                  label: `${item.name} (${item.provider})`,
+                }))}
+              />
+            </Form.Item>
+            <Form.Item name="concurrency" label="并发数" initialValue={1} rules={[{ required: true }]}> 
               <Input type="number" min={1} max={5} />
             </Form.Item>
             <Form.Item name="register_delay_seconds" label="每个注册延迟(秒)" initialValue={0}>

@@ -32,6 +32,7 @@ export default function RegisterTaskPage() {
   const [form] = Form.useForm()
   const [task, setTask] = useState<any>(null)
   const [polling, setPolling] = useState(false)
+  const [mailboxServices, setMailboxServices] = useState<any[]>([])
   const { mode: chatgptRegistrationMode, setMode: setChatgptRegistrationMode } =
     usePersistentChatGPTRegistrationMode()
 
@@ -44,6 +45,10 @@ export default function RegisterTaskPage() {
         mail_provider: cfg.mail_provider || 'luckmail',
         yescaptcha_key: cfg.yescaptcha_key || '',
         moemail_api_url: cfg.moemail_api_url || '',
+        cloudmail_api_url: cfg.cloudmail_api_url || '',
+        cloudmail_admin_email: cfg.cloudmail_admin_email || '',
+        cloudmail_admin_password: cfg.cloudmail_admin_password || '',
+        cloudmail_domains: cfg.cloudmail_domains || '',
         skymail_api_base: cfg.skymail_api_base || 'https://api.skymail.ink',
         skymail_token: cfg.skymail_token || '',
         skymail_domain: cfg.skymail_domain || '',
@@ -83,12 +88,27 @@ export default function RegisterTaskPage() {
         luckmail_domain: cfg.luckmail_domain || '',
       })
     })
+    apiFetch('/mailboxes')
+      .then((items) => {
+        setMailboxServices([
+          { id: 'builtin:tempmail_lol', name: 'TempMail.lol（自动生成）', provider: 'tempmail_lol', is_active: true },
+          ...((items || []).filter((item: any) => item.is_active)),
+        ])
+      })
+      .catch(() => {
+        setMailboxServices([{ id: 'builtin:tempmail_lol', name: 'TempMail.lol（自动生成）', provider: 'tempmail_lol', is_active: true }])
+      })
   }, [form])
 
   const submit = async () => {
     const values = await form.validateFields()
     const registerExtra = {
+      mailbox_service_id: values.mailbox_service_id,
       mail_provider: values.mail_provider,
+      cloudmail_api_url: values.cloudmail_api_url,
+      cloudmail_admin_email: values.cloudmail_admin_email,
+      cloudmail_admin_password: values.cloudmail_admin_password,
+      cloudmail_domains: values.cloudmail_domains,
       laoudo_auth: values.laoudo_auth,
       laoudo_email: values.laoudo_email,
       laoudo_account_id: values.laoudo_account_id,
@@ -254,12 +274,23 @@ export default function RegisterTaskPage() {
         </Card>
 
         <Card title="邮箱配置" style={{ marginBottom: 16 }}>
-          <Form.Item name="mail_provider" label="邮箱服务" rules={[{ required: true }]}>
+          <Form.Item name="mailbox_service_id" label="邮箱服务实例">
+            <Select
+              allowClear
+              placeholder="选择已配置的邮箱服务实例"
+              options={mailboxServices.map((item) => ({
+                value: item.id,
+                label: `${item.name} (${item.provider})`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="mail_provider" label="邮箱服务" rules={[{ required: true }]}> 
             <Select
               options={[
                 { value: 'luckmail', label: 'LuckMail' },
                 { value: 'moemail', label: 'MoeMail (sall.cc)' },
                 { value: 'tempmail_lol', label: 'TempMail.lol' },
+                { value: 'cloudmail', label: 'Cloud Mail' },
                 { value: 'skymail', label: 'SkyMail (CloudMail)' },
                 { value: 'maliapi', label: 'YYDS Mail / MaliAPI' },
                 { value: 'gptmail', label: 'GPTMail' },
@@ -280,6 +311,22 @@ export default function RegisterTaskPage() {
               </Form.Item>
               <Form.Item name="skymail_domain" label="邮箱域名">
                 <Input placeholder="mail.example.com" />
+              </Form.Item>
+            </>
+          )}
+          {mailProvider === 'cloudmail' && (
+            <>
+              <Form.Item name="cloudmail_api_url" label="API URL">
+                <Input placeholder="https://mail.example.com" />
+              </Form.Item>
+              <Form.Item name="cloudmail_admin_email" label="管理员邮箱">
+                <Input placeholder="admin@example.com" />
+              </Form.Item>
+              <Form.Item name="cloudmail_admin_password" label="管理员密码">
+                <Input.Password />
+              </Form.Item>
+              <Form.Item name="cloudmail_domains" label="邮箱域名列表">
+                <Input.TextArea rows={3} placeholder="goodfine.ccwu.cc&#10;example.com&#10;支持英文逗号或换行分隔" />
               </Form.Item>
             </>
           )}

@@ -1,4 +1,5 @@
 """数据库模型 - SQLite via SQLModel"""
+
 from datetime import datetime, timezone
 import os
 from typing import Optional
@@ -8,6 +9,7 @@ import json
 
 def _utcnow():
     return datetime.now(timezone.utc)
+
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///account_manager.db")
 engine = create_engine(DATABASE_URL)
@@ -26,7 +28,7 @@ class AccountModel(SQLModel, table=True):
     status: str = "registered"
     trial_end_time: int = 0
     cashier_url: str = ""
-    extra_json: str = "{}"   # JSON 存储平台自定义字段
+    extra_json: str = "{}"  # JSON 存储平台自定义字段
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -43,7 +45,7 @@ class TaskLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     platform: str
     email: str
-    status: str        # success | failed
+    status: str  # success | failed
     error: str = ""
     detail_json: str = "{}"
     created_at: datetime = Field(default_factory=_utcnow)
@@ -61,7 +63,19 @@ class ProxyModel(SQLModel, table=True):
     last_checked: Optional[datetime] = None
 
 
-def save_account(account) -> 'AccountModel':
+class MailboxServiceModel(SQLModel, table=True):
+    __tablename__ = "mailbox_services"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    provider: str = Field(index=True)
+    config_json: str = "{}"
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+def save_account(account) -> "AccountModel":
     """从 base_platform.Account 存入数据库（同平台同邮箱则更新）"""
     with Session(engine) as session:
         existing = session.exec(

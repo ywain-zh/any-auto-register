@@ -1,4 +1,5 @@
 """account_manager - 多平台账号管理后台"""
+
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -17,6 +18,7 @@ from api.config import router as config_router
 from api.actions import router as actions_router
 from api.integrations import router as integrations_router
 from api.auth import router as auth_router
+from api.mailboxes import router as mailboxes_router
 
 EXPECTED_CONDA_ENV = os.getenv("APP_CONDA_ENV", "any-auto-register")
 
@@ -59,15 +61,20 @@ async def lifespan(app: FastAPI):
     load_all()
     print("[OK] 数据库初始化完成")
     from core.registry import list_platforms
+
     print(f"[OK] 已加载平台: {[p['name'] for p in list_platforms()]}")
     from core.scheduler import scheduler
+
     scheduler.start()
     from services.solver_manager import start_async
+
     start_async()
     yield
     from core.scheduler import scheduler as _scheduler
+
     _scheduler.stop()
     from services.solver_manager import stop
+
     stop()
 
 
@@ -80,6 +87,7 @@ async def auth_middleware(request: Request, call_next):
     if path.startswith("/api/auth/") or not path.startswith("/api/"):
         return await call_next(request)
     from core.config_store import config_store as _cs
+
     if not _cs.get("auth_password_hash", ""):
         return await call_next(request)
     auth_header = request.headers.get("Authorization", "")
@@ -87,6 +95,7 @@ async def auth_middleware(request: Request, call_next):
         return JSONResponse({"detail": "未认证，请先登录"}, status_code=401)
     try:
         from api.auth import verify_token
+
         verify_token(auth_header[7:])
     except HTTPException as e:
         return JSONResponse({"detail": e.detail}, status_code=e.status_code)
@@ -108,17 +117,20 @@ app.include_router(config_router, prefix="/api")
 app.include_router(actions_router, prefix="/api")
 app.include_router(integrations_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(mailboxes_router, prefix="/api")
 
 
 @app.get("/api/solver/status")
 def solver_status():
     from services.solver_manager import is_running
+
     return {"running": is_running()}
 
 
 @app.post("/api/solver/restart")
 def solver_restart():
     from services.solver_manager import stop, start_async
+
     stop()
     start_async()
     return {"message": "重启中"}
@@ -126,7 +138,11 @@ def solver_restart():
 
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
-    app.mount("/assets", StaticFiles(directory=os.path.join(_static_dir, "assets")), name="assets")
+    app.mount(
+        "/assets",
+        StaticFiles(directory=os.path.join(_static_dir, "assets")),
+        name="assets",
+    )
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa_fallback(full_path: str):

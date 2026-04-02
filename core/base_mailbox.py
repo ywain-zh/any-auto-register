@@ -148,6 +148,14 @@ def create_mailbox(
     extra = extra or {}
     if provider == "tempmail_lol":
         return TempMailLolMailbox(proxy=proxy)
+    elif provider == "cloudmail":
+        return CloudMailMailbox(
+            api_url=extra.get("cloudmail_api_url", ""),
+            admin_email=extra.get("cloudmail_admin_email", ""),
+            admin_password=extra.get("cloudmail_admin_password", ""),
+            domains=extra.get("cloudmail_domains", ""),
+            proxy=proxy,
+        )
     elif provider == "skymail":
         return SkyMailMailbox(
             api_base=extra.get("skymail_api_base", "https://api.skymail.ink"),
@@ -645,6 +653,168 @@ class SkyMailMailbox(BaseMailbox):
         )
 
 
+class CloudMailMailbox(BaseMailbox):
+    def __init__(
+        self,
+        api_url: str,
+        admin_email: str,
+        admin_password: str,
+        domains: str = "",
+        proxy: str = None,
+    ):
+        self.api_url = (api_url or "").rstrip("/")
+        self.admin_email = admin_email
+        self.admin_password = admin_password
+        self.domains = domains or ""
+        self.proxy = build_requests_proxy_config(proxy)
+        self._token = None
+
+    def _candidate_domains(self) -> list[str]:
+        raw = str(self.domains or "")
+        parts = []
+        for chunk in raw.replace("\r", "\n").replace(",", "\n").split("\n"):
+            domain = chunk.strip().lstrip("@").lower()
+            if domain:
+                parts.append(domain)
+        if parts:
+            return list(dict.fromkeys(parts))
+        if "@" in self.admin_email:
+            return [self.admin_email.split("@", 1)[1].lower()]
+        return []
+
+    def _headers(self) -> dict:
+        if not self._token:
+            self._token = self._gen_token()
+        return {
+            "Authorization": self._token,
+            "Content-Type": "application/json",
+        }
+
+    def _gen_token(self) -> str:
+        from curl_cffi import requests as curl_requests
+
+        if not self.api_url or not self.admin_email or not self.admin_password:
+            raise RuntimeError(
+                "Cloud Mail 未配置完整，请检查 API URL、管理员邮箱和密码"
+            )
+        r = curl_requests.post(
+            f"{self.api_url}/api/public/genToken",
+            json={"email": self.admin_email, "password": self.admin_password},
+            proxies=self.proxy,
+            timeout=20,
+        )
+        data = r.json()
+        token = ((data or {}).get("data") or {}).get("token", "")
+        if not token:
+            raise RuntimeError(f"Cloud Mail 获取 Token 失败: {data}")
+        return token
+
+    def get_email(self) -> MailboxAccount:
+        from curl_cffi import requests as curl_requests
+        import secrets
+        import string
+
+        local = "poll" + "".join(
+            secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8)
+        )
+        domains = self._candidate_domains()
+        domain = random.choice(domains) if domains else ""
+        if not domain:
+            raise RuntimeError("Cloud Mail 未配置可用域名")
+        email = f"{local}@{domain}"
+        r = curl_requests.post(
+            f"{self.api_url}/api/public/addUser",
+            headers=self._headers(),
+            json={"list": [{"email": email}]},
+            proxies=self.proxy,
+            timeout=20,
+        )
+        data = r.json()
+        if (data or {}).get("code") != 200:
+            raise RuntimeError(f"Cloud Mail 创建邮箱失败: {data}")
+        return MailboxAccount(email=email, account_id=email)
+
+    def get_current_ids(self, account: MailboxAccount) -> set:
+        from curl_cffi import requests as curl_requests
+
+        try:
+            r = curl_requests.post(
+                f"{self.api_url}/api/public/emailList",
+                headers=self._headers(),
+                json={
+                    "toEmail": account.email,
+                    "num": 1,
+                    "size": 50,
+                    "timeSort": "desc",
+                    "type": 0,
+                },
+                proxies=self.proxy,
+                timeout=30,
+            )
+            data = r.json()
+            items = (data or {}).get("data") or []
+            return {
+                str(item.get("emailId"))
+                for item in items
+                if item.get("emailId") is not None
+            }
+        except Exception:
+            return set()
+
+    def wait_for_code(
+        self,
+        account: MailboxAccount,
+        keyword: str = "",
+        timeout: int = 120,
+        before_ids: set = None,
+        code_pattern: str = None,
+        **kwargs,
+    ) -> str:
+        from curl_cffi import requests as curl_requests
+
+        seen = set(before_ids or [])
+
+        def poll_once() -> Optional[str]:
+            try:
+                r = curl_requests.post(
+                    f"{self.api_url}/api/public/emailList",
+                    headers=self._headers(),
+                    json={
+                        "toEmail": account.email,
+                        "num": 1,
+                        "size": 20,
+                        "timeSort": "desc",
+                        "type": 0,
+                    },
+                    proxies=self.proxy,
+                    timeout=30,
+                )
+                data = r.json()
+                items = (data or {}).get("data") or []
+                for item in items:
+                    mail_id = str(item.get("emailId"))
+                    if mail_id in seen:
+                        continue
+                    seen.add(mail_id)
+                    subject = str(item.get("subject") or "")
+                    text = str(item.get("text") or "")
+                    content = str(item.get("content") or "")
+                    source = f"{subject}\n{text}\n{content}"
+                    code = self._safe_extract(source, code_pattern)
+                    if code:
+                        return code
+            except Exception:
+                pass
+            return None
+
+        return self._run_polling_wait(
+            timeout=timeout,
+            poll_interval=5,
+            poll_once=poll_once,
+            timeout_message=f"Cloud Mail 等待验证码超时 ({timeout}s)",
+        )
+
+
 class DuckMailMailbox(BaseMailbox):
     """DuckMail 自动生成邮箱（随机创建账号）"""
 
@@ -1061,7 +1231,9 @@ class GPTMailMailbox(BaseMailbox):
 
         if response.status_code >= 400:
             error = payload.get("error") if isinstance(payload, dict) else ""
-            message = str(error or response.text or f"HTTP {response.status_code}").strip()
+            message = str(
+                error or response.text or f"HTTP {response.status_code}"
+            ).strip()
             raise RuntimeError(f"GPTMail API {path} 失败: {message}")
 
         if isinstance(payload, dict) and payload.get("success") is False:
@@ -1073,7 +1245,9 @@ class GPTMailMailbox(BaseMailbox):
         return payload
 
     def _list_messages(self, email: str) -> list[dict]:
-        data = self._request_json("GET", "/api/emails", params={"email": email}, timeout=10)
+        data = self._request_json(
+            "GET", "/api/emails", params={"email": email}, timeout=10
+        )
         if isinstance(data, dict):
             messages = data.get("emails", [])
         else:
@@ -1092,7 +1266,11 @@ class GPTMailMailbox(BaseMailbox):
             return MailboxAccount(
                 email=email,
                 account_id=email,
-                extra={"provider": "gptmail", "domain": self.domain, "local_address": True},
+                extra={
+                    "provider": "gptmail",
+                    "domain": self.domain,
+                    "local_address": True,
+                },
             )
 
         data = self._request_json("GET", "/api/generate-email")
@@ -1870,7 +2048,10 @@ class LuckMailMailbox(BaseMailbox):
                         raise TimeoutError(f"LuckMail 等待验证码失败: {e}") from e
 
                     last_status = str(code_result.status or "pending")
-                    if code_result.status == "success" and code_result.verification_code:
+                    if (
+                        code_result.status == "success"
+                        and code_result.verification_code
+                    ):
                         code = code_result.verification_code
                         self._log(f"[LuckMail] 收到验证码: {code}")
                         return code

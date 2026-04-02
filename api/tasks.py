@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from typing import Optional
 from copy import deepcopy
-from core.db import TaskLog, engine
+from core.db import TaskLog, MailboxServiceModel, engine
 from core.task_runtime import (
     AttemptOutcome,
     AttemptResult,
@@ -60,6 +60,20 @@ def _prepare_register_request(req: RegisterTaskRequest) -> RegisterTaskRequest:
     req_data = req.model_dump()
     req_data["extra"] = deepcopy(req_data.get("extra") or {})
     prepared = RegisterTaskRequest(**req_data)
+
+    mailbox_service_id = prepared.extra.get("mailbox_service_id")
+    if mailbox_service_id:
+        if isinstance(mailbox_service_id, str) and mailbox_service_id.startswith(
+            "builtin:"
+        ):
+            prepared.extra["mail_provider"] = mailbox_service_id.split(":", 1)[1]
+        else:
+            with Session(engine) as session:
+                mailbox_item = session.get(MailboxServiceModel, int(mailbox_service_id))
+                if not mailbox_item or not mailbox_item.is_active:
+                    raise HTTPException(400, "所选邮箱服务不存在或已停用")
+                prepared.extra["mail_provider"] = mailbox_item.provider
+                prepared.extra.update(json.loads(mailbox_item.config_json or "{}"))
 
     mail_provider = prepared.extra.get("mail_provider") or config_store.get(
         "mail_provider", ""
