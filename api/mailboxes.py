@@ -165,12 +165,27 @@ def import_hotmail_accounts_api(
 
 
 @router.get("/{mailbox_id}/hotmail/accounts")
-def list_hotmail_accounts_api(mailbox_id: int, session: Session = Depends(get_session)):
+def list_hotmail_accounts_api(
+    mailbox_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    session: Session = Depends(get_session),
+):
     item = session.get(MailboxServiceModel, mailbox_id)
     if not item or item.provider != "hotmail":
         raise HTTPException(404, "Hotmail 邮箱服务不存在")
-    rows = list_hotmail_accounts(session=session, mailbox_service_id=mailbox_id)
-    return [_serialize_hotmail_account(row) for row in rows]
+    total, rows = list_hotmail_accounts(
+        session=session,
+        mailbox_service_id=mailbox_id,
+        page=page,
+        page_size=page_size,
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [_serialize_hotmail_account(row) for row in rows],
+    }
 
 
 @router.patch("/{mailbox_id}/hotmail/accounts/status")
@@ -204,7 +219,7 @@ def get_hotmail_latest_mail_api(
         _, cfg = get_hotmail_service_config(session, mailbox_id)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
-    rows = list_hotmail_accounts(session=session, mailbox_service_id=mailbox_id)
+    _, rows = list_hotmail_accounts(session=session, mailbox_service_id=mailbox_id)
     row = next((item for item in rows if int(item.id or 0) == account_id), None)
     if not row:
         raise HTTPException(404, "Hotmail 账号不存在")
@@ -237,7 +252,7 @@ def bind_hotmail_account_api(
     except ValueError as exc:
         raise HTTPException(404, str(exc))
 
-    rows = list_hotmail_accounts(session=session, mailbox_service_id=mailbox_id)
+    _, rows = list_hotmail_accounts(session=session, mailbox_service_id=mailbox_id)
     row = next((item for item in rows if int(item.id or 0) == account_id), None)
     if not row:
         raise HTTPException(404, "Hotmail 账号不存在")

@@ -89,12 +89,19 @@ def list_hotmail_accounts(
     *,
     session: Session,
     mailbox_service_id: int,
-) -> list[HotmailAccountModel]:
-    return session.exec(
-        select(HotmailAccountModel)
-        .where(HotmailAccountModel.mailbox_service_id == mailbox_service_id)
-        .order_by(HotmailAccountModel.created_at.asc())
+    page: int = 1,
+    page_size: int = 10,
+) -> tuple[int, list[HotmailAccountModel]]:
+    query = select(HotmailAccountModel).where(
+        HotmailAccountModel.mailbox_service_id == mailbox_service_id
+    )
+    total = len(session.exec(query).all())
+    items = session.exec(
+        query.order_by(HotmailAccountModel.created_at.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all()
+    return total, items
 
 
 def claim_unregistered_hotmail_account(

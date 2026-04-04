@@ -67,7 +67,10 @@ const TAB_ITEMS = [
       {
         title: '默认注册方式',
         desc: '控制注册任务如何执行',
-        fields: [{ key: 'default_executor', label: '执行器类型', type: 'select' }],
+        fields: [
+          { key: 'default_executor', label: '执行器类型', type: 'select' },
+          { key: 'default_proxy', label: '默认代理', placeholder: 'http://user:pass@host:port' },
+        ],
       },
     ],
   },
@@ -467,6 +470,10 @@ function MailboxServicesPanel() {
   const [importing, setImporting] = useState(false)
   const [hotmailModalOpen, setHotmailModalOpen] = useState(false)
   const [hotmailAccounts, setHotmailAccounts] = useState<any[]>([])
+  const [hotmailTotal, setHotmailTotal] = useState(0)
+  const [hotmailPage, setHotmailPage] = useState(1)
+  const [hotmailPageSize] = useState(10)
+  const [hotmailCurrentService, setHotmailCurrentService] = useState<MailboxServiceItem | null>(null)
   const [hotmailMailModal, setHotmailMailModal] = useState<{ open: boolean; title: string; content: string }>({ open: false, title: '', content: '' })
   const [hotmailBindingId, setHotmailBindingId] = useState<number | null>(null)
   const [form] = Form.useForm()
@@ -565,9 +572,16 @@ function MailboxServicesPanel() {
     }
   }
 
+  const loadHotmailAccounts = async (item: MailboxServiceItem, page = 1) => {
+    const result = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts?page=${page}&page_size=${hotmailPageSize}`)
+    setHotmailAccounts(result?.items || [])
+    setHotmailTotal(result?.total || 0)
+    setHotmailPage(result?.page || page)
+  }
+
   const openHotmailAccounts = async (item: MailboxServiceItem) => {
-    const result = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts`)
-    setHotmailAccounts(result || [])
+    setHotmailCurrentService(item)
+    await loadHotmailAccounts(item, 1)
     setHotmailModalOpen(true)
   }
 
@@ -588,8 +602,7 @@ function MailboxServicesPanel() {
         body: JSON.stringify({ proxy: 'http://127.0.0.1:4874', headless: false }),
       })
       message.success('登录绑定完成，已尝试上传到 CPA')
-      const refreshed = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts`)
-      setHotmailAccounts(refreshed || [])
+      await loadHotmailAccounts(item, hotmailPage)
       setHotmailMailModal({
         open: true,
         title: `${account.email} 绑定日志`,
@@ -691,12 +704,25 @@ function MailboxServicesPanel() {
       <Modal
         open={hotmailModalOpen}
         title="Hotmail 账号列表"
-        onCancel={() => setHotmailModalOpen(false)}
+        onCancel={() => {
+          setHotmailModalOpen(false)
+          setHotmailCurrentService(null)
+          setHotmailPage(1)
+        }}
         footer={null}
         width={920}
       >
         <List
           dataSource={hotmailAccounts}
+          pagination={{
+            current: hotmailPage,
+            pageSize: hotmailPageSize,
+            total: hotmailTotal,
+            showSizeChanger: false,
+            onChange: (page) => {
+              if (hotmailCurrentService) loadHotmailAccounts(hotmailCurrentService, page)
+            },
+          }}
           renderItem={(account) => (
             <List.Item
               actions={[

@@ -37,6 +37,8 @@ export default function RegisterTaskPage() {
   const [mailboxServices, setMailboxServices] = useState<any[]>([])
   const [cpaRunning, setCpaRunning] = useState(false)
   const [cpaOutput, setCpaOutput] = useState('')
+  const [lastSubmittedProxy, setLastSubmittedProxy] = useState('')
+  const [proxyValue, setProxyValue] = useState('')
   const { mode: chatgptRegistrationMode, setMode: setChatgptRegistrationMode } =
     usePersistentChatGPTRegistrationMode()
 
@@ -91,6 +93,7 @@ export default function RegisterTaskPage() {
         luckmail_email_type: cfg.luckmail_email_type || '',
         luckmail_domain: cfg.luckmail_domain || '',
       })
+      setProxyValue(cfg.default_proxy || '')
     })
     apiFetch('/mailboxes')
       .then((items) => {
@@ -105,10 +108,16 @@ export default function RegisterTaskPage() {
   }, [form])
 
   const submit = async () => {
-    const values = await form.validateFields()
+    const validatedValues = await form.validateFields()
+    const values = { ...form.getFieldsValue(true), ...validatedValues }
+    const resolvedProxy = (proxyValue || '').trim()
+    values.proxy = resolvedProxy || null
+    console.log('[RegisterTaskPage] submit proxy =', values.proxy)
+    setLastSubmittedProxy(values.proxy || '')
     const registerExtra = {
       mailbox_service_id: values.mailbox_service_id,
       mail_provider: values.mail_provider,
+      proxy: values.proxy,
       cloudmail_api_url: values.cloudmail_api_url,
       cloudmail_admin_email: values.cloudmail_admin_email,
       cloudmail_admin_password: values.cloudmail_admin_password,
@@ -283,10 +292,26 @@ export default function RegisterTaskPage() {
             </Form.Item>
           </Space>
           <Space style={{ width: '100%' }}>
-            <Form.Item name="proxy" label="代理 (可选)" style={{ flex: 1 }}>
-              <Input placeholder="http://user:pass@host:port" />
-            </Form.Item>
+            <div style={{ flex: 1 }}>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>代理 (可选)</div>
+              <Input
+                id="proxy"
+                value={proxyValue}
+                placeholder="http://user:pass@host:port"
+                onChange={(e) => setProxyValue(e.target.value)}
+              />
+            </div>
           </Space>
+          {platform === 'codex' ? (
+            <div style={{ marginBottom: 12 }}>
+              <Text type="secondary" style={{ display: 'block' }}>
+                当前表单代理: {proxyValue || '(空)'}
+              </Text>
+              <Text type="secondary" style={{ display: 'block' }}>
+                最近一次提交代理: {lastSubmittedProxy || '(空)'}
+              </Text>
+            </div>
+          ) : null}
           {platform === 'chatgpt' && (
             <Form.Item label="ChatGPT Token 方案">
               <ChatGPTRegistrationModeSwitch

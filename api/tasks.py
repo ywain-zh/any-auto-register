@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from typing import Optional
 from copy import deepcopy
+import sys
 from core.db import TaskLog, MailboxServiceModel, engine
 from core.task_runtime import (
     AttemptOutcome,
@@ -59,6 +60,8 @@ def _prepare_register_request(req: RegisterTaskRequest) -> RegisterTaskRequest:
 
     req_data = req.model_dump()
     req_data["extra"] = deepcopy(req_data.get("extra") or {})
+    if not req_data.get("proxy") and req_data["extra"].get("proxy"):
+        req_data["proxy"] = req_data["extra"].get("proxy")
     prepared = RegisterTaskRequest(**req_data)
 
     mailbox_service_id = prepared.extra.get("mailbox_service_id")
@@ -117,7 +120,9 @@ def _mark_hotmail_status(
         )
 
 
-def _run_codex_via_original_scripts(task_id: str, req: RegisterTaskRequest):
+def _run_codex_via_original_scripts(
+    task_id: str, req: RegisterTaskRequest, proxy: str | None
+):
     from core.config_store import config_store
     from sqlmodel import Session, select
     from services.codex_script_bridge import (
@@ -171,50 +176,43 @@ def _run_codex_via_original_scripts(task_id: str, req: RegisterTaskRequest):
             "refresh_token": row.refresh_token,
         }
         _log(task_id, f"Codex 原脚本桥接将使用邮箱: {row.email}")
+    _log(task_id, f"Codex 原脚本桥接收到代理: {proxy}")
 
+    runtime_email_domains = (
+        []
+        if mail_provider == "hotmail"
+        else [
+            x.strip()
+            for x in str(merged_extra.get("cloudmail_domains") or "").splitlines()
+            if x.strip()
+        ]
+    )
+    runtime_mail_api = (
+        {
+            "provider": "hotmail_api",
+            "url": "https://www.appleemail.top",
+            "accounts_file": str(SCRIPT_DIR / "hotmail_accounts_runtime.txt"),
+            "base_dir": str(SCRIPT_DIR),
+        }
+        if mail_provider == "hotmail"
+        else {
+            "provider": "cloudmail",
+            "url": str(merged_extra.get("cloudmail_api_url") or "").strip(),
+            "admin_email": str(merged_extra.get("cloudmail_admin_email") or "").strip(),
+            "admin_password": str(
+                merged_extra.get("cloudmail_admin_password") or ""
+            ).strip(),
+            "domains": runtime_email_domains,
+            "base_dir": str(SCRIPT_DIR),
+        }
+    )
     config_path = SCRIPT_DIR / f"pool_config.{mail_provider}.runtime.yaml"
     config_path.write_text(
         json.dumps(
             {
                 "cliproxy": {"url": cpa_url, "key": cpa_key},
-                "email_domains": (
-                    []
-                    if mail_provider == "hotmail"
-                    else [
-                        x.strip()
-                        for x in str(
-                            merged_extra.get("cloudmail_domains") or ""
-                        ).splitlines()
-                        if x.strip()
-                    ]
-                ),
-                "mail_api": (
-                    {
-                        "provider": "hotmail_api",
-                        "url": "https://www.appleemail.top",
-                        "accounts_file": str(
-                            SCRIPT_DIR / "hotmail_accounts_runtime.txt"
-                        ),
-                    }
-                    if mail_provider == "hotmail"
-                    else {
-                        "provider": "cloudmail",
-                        "url": str(merged_extra.get("cloudmail_api_url") or "").strip(),
-                        "admin_email": str(
-                            merged_extra.get("cloudmail_admin_email") or ""
-                        ).strip(),
-                        "admin_password": str(
-                            merged_extra.get("cloudmail_admin_password") or ""
-                        ).strip(),
-                        "domains": [
-                            x.strip()
-                            for x in str(
-                                merged_extra.get("cloudmail_domains") or ""
-                            ).splitlines()
-                            if x.strip()
-                        ],
-                    }
-                ),
+                "email_domains": runtime_email_domains,
+                "mail_api": runtime_mail_api,
             },
             ensure_ascii=False,
             indent=2,
@@ -235,12 +233,21 @@ def _run_codex_via_original_scripts(task_id: str, req: RegisterTaskRequest):
             encoding="utf-8",
         )
 
+    is_headless = req.executor_type != "headed"
+    _log(
+        task_id,
+        f"[CODEX] executor_type={req.executor_type}, headless={str(is_headless).lower()}",
+    )
+    _log(task_id, f"[CODEX] 开始执行注册脚本，provider={mail_provider}")
     reg_result = run_original_codex_register(
         config_path=str(config_path),
         hotmail_account_record=hotmail_record,
-        proxy=req.proxy,
-        headless=req.executor_type != "headed",
+        proxy=proxy,
+        headless=is_headless,
+        log_fn=lambda msg: _log(task_id, msg),
     )
+    _log(task_id, f"Codex 注册预热: {reg_result.get('prewarm')}")
+    _log(task_id, f"Codex 注册命令: {' '.join(reg_result.get('command') or [])}")
     if not reg_result.get("ok"):
         raise RuntimeError(
             reg_result.get("stderr") or reg_result.get("stdout") or "原注册脚本失败"
@@ -251,7 +258,8 @@ def _run_codex_via_original_scripts(task_id: str, req: RegisterTaskRequest):
     if len(parts) < 2:
         raise RuntimeError(f"无法解析原注册结果: {last_line}")
     email, openai_password = parts[0], parts[1]
-    _log(task_id, f"Codex 原脚本注册成功: {email}")
+    _log(task_id, f"[CODEX] 注册阶段成功: {email}")
+    _log(task_id, f"[CODEX] 开始执行 OAuth / CPA 绑定，provider={mail_provider}")
     bind_result = None
     if mail_provider == "hotmail":
         _mark_hotmail_status(
@@ -260,28 +268,31 @@ def _run_codex_via_original_scripts(task_id: str, req: RegisterTaskRequest):
             "pending_bind",
             openai_password=openai_password,
         )
-        bind_result = run_original_codex_oauth_bind(
-            email=email,
-            password=openai_password,
-            cpa_url=cpa_url,
-            cpa_key=cpa_key,
-            proxy=req.proxy,
-            headless=req.executor_type != "headed",
-            hotmail_account_record=hotmail_record,
+    bind_result = run_original_codex_oauth_bind(
+        email=email,
+        password=openai_password,
+        cpa_url=cpa_url,
+        cpa_key=cpa_key,
+        proxy=proxy,
+        headless=is_headless,
+        mail_api_config=runtime_mail_api,
+        hotmail_account_record=hotmail_record,
+        log_fn=lambda msg: _log(task_id, msg),
+    )
+    if not bind_result.get("ok"):
+        raise RuntimeError(
+            bind_result.get("stderr")
+            or bind_result.get("stdout")
+            or "原 OAuth 脚本失败"
         )
-        if not bind_result.get("ok"):
-            raise RuntimeError(
-                bind_result.get("stderr")
-                or bind_result.get("stdout")
-                or "原 OAuth 脚本失败"
-            )
+    if mail_provider == "hotmail":
         _mark_hotmail_status(
             merged_extra,
             email,
             "success",
             openai_password=openai_password,
         )
-    _log(task_id, f"✓ Codex 原脚本完整流程成功: {email}")
+    _log(task_id, f"[OK] Codex 原脚本完整流程成功: {email}")
     return {
         "email": email,
         "password": openai_password,
@@ -311,6 +322,8 @@ def enqueue_register_task(
     prepared = _prepare_register_request(req)
     task_id = f"task_{int(time.time() * 1000)}"
     _create_task_record(task_id, prepared, source, meta)
+    _log(task_id, f"收到任务代理: {req.proxy}")
+    _log(task_id, f"准备后任务代理: {prepared.proxy}")
     if background_tasks is None:
         thread = threading.Thread(
             target=_run_register, args=(task_id, prepared), daemon=True
@@ -332,7 +345,14 @@ def _log(task_id: str, msg: str):
     ts = time.strftime("%H:%M:%S")
     entry = f"[{ts}] {msg}"
     _task_store.append_log(task_id, entry)
-    print(entry)
+    try:
+        print(entry)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        safe_entry = entry.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
+        print(safe_entry)
 
 
 def _save_task_log(
@@ -360,7 +380,7 @@ def _auto_upload_integrations(task_id: str, account):
             name = result.get("name", "Auto Upload")
             ok = bool(result.get("ok"))
             msg = result.get("msg", "")
-            _log(task_id, f"  [{name}] {'✓ ' + msg if ok else '✗ ' + msg}")
+            _log(task_id, f"  [{name}] {'[OK] ' + msg if ok else '[ERR] ' + msg}")
     except Exception as e:
         _log(task_id, f"  [Auto Upload] 自动导入异常: {e}")
 
@@ -454,7 +474,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 if _proxy:
                     _log(task_id, f"使用代理: {_proxy}")
                 if req.platform == "codex":
-                    result = _run_codex_via_original_scripts(task_id, req)
+                    result = _run_codex_via_original_scripts(task_id, req, _proxy)
                     current_email = result.get("email") or current_email
                     _save_task_log(
                         req.platform, current_email, "success", detail=result
@@ -493,7 +513,10 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                                 merged_extra.get("luckmail_base_url"),
                             )
                 saved_account = save_account(account)
-                if merged_extra.get("mail_provider") == "hotmail":
+                if (
+                    req.platform != "codex"
+                    and merged_extra.get("mail_provider") == "hotmail"
+                ):
                     _mark_hotmail_status(
                         merged_extra,
                         account.email,
@@ -502,7 +525,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                     )
                 if _proxy:
                     proxy_pool.report_success(_proxy)
-                _log(task_id, f"✓ 注册成功: {account.email}")
+                _log(task_id, f"[OK] 注册成功: {account.email}")
                 _save_task_log(req.platform, account.email, "success")
                 _auto_upload_integrations(task_id, saved_account or account)
                 cashier_url = (account.extra or {}).get("cashier_url", "")
@@ -525,14 +548,17 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
             except Exception as e:
                 if _proxy and proxy_pool is not None:
                     proxy_pool.report_fail(_proxy)
-                if merged_extra.get("mail_provider") == "hotmail":
+                if (
+                    req.platform == "codex"
+                    and merged_extra.get("mail_provider") == "hotmail"
+                ):
                     _mark_hotmail_status(
                         merged_extra,
                         current_email,
                         "failed",
                         error=str(e),
                     )
-                _log(task_id, f"✗ 注册失败: {e}")
+                _log(task_id, f"[ERR] 注册失败: {e}")
                 _save_task_log(
                     req.platform,
                     current_email,
@@ -551,7 +577,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 try:
                     result = f.result()
                 except Exception as e:
-                    _log(task_id, f"✗ 任务线程异常: {e}")
+                    _log(task_id, f"[ERR] 任务线程异常: {e}")
                     errors.append(str(e))
                     continue
                 if result.outcome == AttemptOutcome.SUCCESS:

@@ -93,9 +93,11 @@ def do_register(email, password, mail_cfg, proxy=None, headless=True):
             try:
                 s = cffi_requests.Session(proxies=proxies, impersonate="chrome")
                 print(f"  [{ts()}] session 请求 ({attempt + 1}/3)...", flush=True)
-                s.get("https://chatgpt.com", timeout=30)
+                r1 = s.get("https://chatgpt.com", timeout=30)
+                print(f"  [{ts()}] chatgpt 响应: {r1.status_code}", flush=True)
                 print(f"  [{ts()}] 获取 csrf...", flush=True)
                 csrf_resp = s.get("https://chatgpt.com/api/auth/csrf", timeout=20)
+                print(f"  [{ts()}] csrf 响应: {csrf_resp.status_code}", flush=True)
                 csrf_token = (
                     csrf_resp.json().get("csrfToken", "")
                     if csrf_resp.status_code == 200
