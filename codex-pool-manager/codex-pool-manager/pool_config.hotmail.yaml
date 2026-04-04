@@ -1,0 +1,15 @@
+# CLIProxyAPI 配置
+cliproxy:
+  url: "http://38.47.113.111:8317"
+  key: "zyd035713"
+
+# 注册时使用固定 Hotmail 账号，不走随机域名
+email_domains: []
+
+mail_api:
+  provider: "hotmail_api"
+  url: "https://www.appleemail.top"
+  accounts_file: "..\\..\\hotmail_account\\BBGGOOX26CXS8JRF_20260403_182608.txt"
+
+# 浏览器
+headless: false

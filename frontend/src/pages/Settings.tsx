@@ -24,6 +24,7 @@ const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
     { label: 'Laoudo（固定邮箱）', value: 'laoudo' },
     { label: 'TempMail.lol（自动生成）', value: 'tempmail_lol' },
     { label: 'Cloud Mail（自建平台）', value: 'cloudmail' },
+    { label: 'Hotmail（导入账号池）', value: 'hotmail' },
     { label: 'SkyMail（CloudMail 接口）', value: 'skymail' },
     { label: 'DuckMail（自动生成）', value: 'duckmail' },
     { label: 'MoeMail (sall.cc)', value: 'moemail' },
@@ -164,6 +165,11 @@ const TAB_ITEMS = [
         ],
       },
       {
+        title: 'Codex',
+        desc: 'Codex 注册流程依赖 CLIProxyAPI 管理面板和邮箱服务配置。若使用 Hotmail，请先在邮箱服务实例中导入账号池。',
+        fields: [],
+      },
+      {
         title: 'SMSToMe 手机验证',
         desc: 'ChatGPT add_phone 阶段自动取号并轮询短信验证码',
         fields: [
@@ -287,6 +293,7 @@ const BUILTIN_MAILBOX_SERVICES: MailboxServiceItem[] = [
 
 const MAILBOX_PROVIDER_OPTIONS = [
   { label: 'Cloud Mail', value: 'cloudmail' },
+  { label: 'Hotmail', value: 'hotmail' },
   { label: 'SkyMail', value: 'skymail' },
   { label: 'DuckMail', value: 'duckmail' },
   { label: 'GPTMail', value: 'gptmail' },
@@ -304,6 +311,7 @@ const MAILBOX_PROVIDER_FIELDS: Record<string, FieldConfig[]> = {
     { key: 'cloudmail_admin_password', label: '管理员密码', secret: true },
     { key: 'cloudmail_domains', label: '邮箱域名列表', placeholder: 'goodfine.ccwu.cc\nexample.com\n或用英文逗号分隔' },
   ],
+  hotmail: [],
   skymail: [
     { key: 'skymail_api_base', label: 'Base URL', placeholder: 'https://mail.example.com' },
     { key: 'skymail_token', label: 'Authorization Token', secret: true },
@@ -456,6 +464,11 @@ function MailboxServicesPanel() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<MailboxServiceItem | null>(null)
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [hotmailModalOpen, setHotmailModalOpen] = useState(false)
+  const [hotmailAccounts, setHotmailAccounts] = useState<any[]>([])
+  const [hotmailMailModal, setHotmailMailModal] = useState<{ open: boolean; title: string; content: string }>({ open: false, title: '', content: '' })
+  const [hotmailBindingId, setHotmailBindingId] = useState<number | null>(null)
   const [form] = Form.useForm()
   const provider = Form.useWatch('provider', form)
 
@@ -537,6 +550,56 @@ function MailboxServicesPanel() {
     }
   }
 
+  const handleImportHotmail = async (item: MailboxServiceItem, file: File) => {
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      const result = await apiFetch(`/mailboxes/${item.id}/hotmail/import`, {
+        method: 'POST',
+        body: JSON.stringify({ lines }),
+      })
+      message.success(`导入完成：新增 ${result.created}，更新 ${result.updated}`)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const openHotmailAccounts = async (item: MailboxServiceItem) => {
+    const result = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts`)
+    setHotmailAccounts(result || [])
+    setHotmailModalOpen(true)
+  }
+
+  const openLatestMail = async (item: MailboxServiceItem, accountId: number, email: string) => {
+    const result = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts/${accountId}/latest-mail`)
+    setHotmailMailModal({
+      open: true,
+      title: `${email} 最新邮件`,
+      content: formatResultText(result),
+    })
+  }
+
+  const bindHotmailAccount = async (item: MailboxServiceItem, account: any) => {
+    setHotmailBindingId(account.id)
+    try {
+      const result = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts/${account.id}/bind`, {
+        method: 'POST',
+        body: JSON.stringify({ proxy: 'http://127.0.0.1:4874', headless: false }),
+      })
+      message.success('登录绑定完成，已尝试上传到 CPA')
+      const refreshed = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts`)
+      setHotmailAccounts(refreshed || [])
+      setHotmailMailModal({
+        open: true,
+        title: `${account.email} 绑定日志`,
+        content: formatResultText(result),
+      })
+    } finally {
+      setHotmailBindingId(null)
+    }
+  }
+
   return (
     <>
       <Card
@@ -554,6 +617,26 @@ function MailboxServicesPanel() {
             return (
               <List.Item
                 actions={builtin ? [] : [
+                  item.provider === 'hotmail' ? (
+                    <Button
+                      key="import"
+                      type="text"
+                      loading={importing}
+                      onClick={() => {
+                        const input = document.createElement('input')
+                        input.type = 'file'
+                        input.accept = '.txt,text/plain'
+                        input.onchange = async () => {
+                          const file = input.files?.[0]
+                          if (file) await handleImportHotmail(item, file)
+                        }
+                        input.click()
+                      }}
+                    >导入</Button>
+                  ) : null,
+                  item.provider === 'hotmail' ? (
+                    <Button key="view" type="text" onClick={() => openHotmailAccounts(item)}>查看</Button>
+                  ) : null,
                   <Button key="edit" type="text" icon={<EditOutlined />} onClick={() => openEdit(item)} />,
                   <Button key="toggle" type="text" onClick={() => handleToggle(item)}>{item.is_active ? '停用' : '启用'}</Button>,
                   <Popconfirm key="delete" title="确认删除这个邮箱服务？" onConfirm={() => handleDelete(item)}>
@@ -603,6 +686,79 @@ function MailboxServicesPanel() {
           </Form.Item>
           <MailboxServiceModalFields provider={provider} />
         </Form>
+      </Modal>
+
+      <Modal
+        open={hotmailModalOpen}
+        title="Hotmail 账号列表"
+        onCancel={() => setHotmailModalOpen(false)}
+        footer={null}
+        width={920}
+      >
+        <List
+          dataSource={hotmailAccounts}
+          renderItem={(account) => (
+            <List.Item
+              actions={[
+                <Button
+                  key="bind"
+                  type="link"
+                  loading={hotmailBindingId === account.id}
+                  disabled={!account.openai_password}
+                  onClick={() => {
+                    const service = items.find((entry) => entry.provider === 'hotmail' && entry.id === account.mailbox_service_id)
+                    if (service) bindHotmailAccount(service, account)
+                  }}
+                >登录绑定</Button>,
+                <Button key="mail" type="link" onClick={() => {
+                  const service = items.find((entry) => entry.provider === 'hotmail' && entry.id === account.mailbox_service_id)
+                  if (service) openLatestMail(service, account.id, account.email)
+                }}>查邮件</Button>,
+              ]}
+            >
+              <List.Item.Meta
+                title={
+                  <Space>
+                    <span>{account.email}</span>
+                    <Tag color={account.register_status === 'success' ? 'green' : account.register_status === 'failed' ? 'red' : account.register_status === 'pending_bind' ? 'gold' : 'default'}>
+                      {account.register_status === 'success' ? '注册成功' : account.register_status === 'failed' ? '注册失败' : account.register_status === 'pending_bind' ? '待绑定' : '未注册'}
+                    </Tag>
+                  </Space>
+                }
+                description={
+                  <Typography.Text type="secondary">
+                    {account.last_error ? `错误: ${account.last_error}` : account.openai_password ? `OpenAI 密码已保存` : '尚未生成 OpenAI 密码'}
+                  </Typography.Text>
+                }
+              />
+            </List.Item>
+          )}
+        />
+      </Modal>
+
+      <Modal
+        open={hotmailMailModal.open}
+        title={hotmailMailModal.title}
+        onCancel={() => setHotmailMailModal((prev) => ({ ...prev, open: false }))}
+        onOk={() => setHotmailMailModal((prev) => ({ ...prev, open: false }))}
+        width={760}
+      >
+        <pre
+          style={{
+            margin: 0,
+            maxHeight: 420,
+            overflow: 'auto',
+            padding: 12,
+            borderRadius: 8,
+            background: 'rgba(127,127,127,0.08)',
+            fontSize: 12,
+            lineHeight: 1.5,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {hotmailMailModal.content}
+        </pre>
       </Modal>
     </>
   )

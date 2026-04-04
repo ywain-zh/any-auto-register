@@ -74,6 +74,7 @@ def _prepare_register_request(req: RegisterTaskRequest) -> RegisterTaskRequest:
                     raise HTTPException(400, "所选邮箱服务不存在或已停用")
                 prepared.extra["mail_provider"] = mailbox_item.provider
                 prepared.extra.update(json.loads(mailbox_item.config_json or "{}"))
+                prepared.extra["hotmail_mailbox_service_id"] = mailbox_item.id
 
     mail_provider = prepared.extra.get("mail_provider") or config_store.get(
         "mail_provider", ""
@@ -93,6 +94,199 @@ def _prepare_register_request(req: RegisterTaskRequest) -> RegisterTaskRequest:
         prepared.extra["luckmail_project_code"] = mapping.get(platform, platform)
 
     return prepared
+
+
+def _mark_hotmail_status(
+    extra: dict, email: str, status: str, *, openai_password: str = "", error: str = ""
+) -> None:
+    mailbox_service_id = int(extra.get("hotmail_mailbox_service_id") or 0)
+    if not mailbox_service_id or not email:
+        return
+    from sqlmodel import Session
+    from core.db import engine
+    from services.hotmail_accounts import update_hotmail_registration_status
+
+    with Session(engine) as session:
+        update_hotmail_registration_status(
+            session=session,
+            mailbox_service_id=mailbox_service_id,
+            email=email,
+            status=status,
+            openai_password=openai_password,
+            error=error,
+        )
+
+
+def _run_codex_via_original_scripts(task_id: str, req: RegisterTaskRequest):
+    from core.config_store import config_store
+    from sqlmodel import Session, select
+    from services.codex_script_bridge import (
+        ROOT_DIR as BRIDGE_ROOT,
+        SCRIPT_DIR,
+        run_original_codex_oauth_bind,
+        run_original_codex_register,
+    )
+    from core.db import HotmailAccountModel
+
+    merged_extra = config_store.get_all().copy()
+    merged_extra.update(
+        {k: v for k, v in req.extra.items() if v is not None and v != ""}
+    )
+    mail_provider = str(merged_extra.get("mail_provider") or "").strip().lower()
+    mailbox_service_id = int(merged_extra.get("hotmail_mailbox_service_id") or 0)
+    if mail_provider not in {"hotmail", "cloudmail"}:
+        raise RuntimeError("Codex 原脚本桥接当前仅支持 Hotmail / CloudMail 服务实例")
+
+    cpa_url = str(
+        merged_extra.get("cliproxyapi_base_url")
+        or merged_extra.get("cpa_api_url")
+        or merged_extra.get("codex_proxy_url")
+        or ""
+    ).strip()
+    cpa_key = str(
+        merged_extra.get("cliproxyapi_management_key")
+        or merged_extra.get("cpa_api_key")
+        or merged_extra.get("codex_proxy_key")
+        or ""
+    ).strip()
+    if not cpa_url or not cpa_key:
+        raise RuntimeError("未配置 CLIProxyAPI / CPA 地址或管理口令")
+
+    row = None
+    hotmail_record = None
+    if mail_provider == "hotmail":
+        with Session(engine) as s:
+            row = s.exec(
+                select(HotmailAccountModel)
+                .where(HotmailAccountModel.mailbox_service_id == mailbox_service_id)
+                .where(HotmailAccountModel.register_status == "unregistered")
+                .order_by(HotmailAccountModel.created_at.asc())
+            ).first()
+        if not row:
+            raise RuntimeError("没有可用的未注册 Hotmail 账号")
+        hotmail_record = {
+            "email": row.email,
+            "mailbox_password": row.mailbox_password,
+            "client_id": row.client_id,
+            "refresh_token": row.refresh_token,
+        }
+        _log(task_id, f"Codex 原脚本桥接将使用邮箱: {row.email}")
+
+    config_path = SCRIPT_DIR / f"pool_config.{mail_provider}.runtime.yaml"
+    config_path.write_text(
+        json.dumps(
+            {
+                "cliproxy": {"url": cpa_url, "key": cpa_key},
+                "email_domains": (
+                    []
+                    if mail_provider == "hotmail"
+                    else [
+                        x.strip()
+                        for x in str(
+                            merged_extra.get("cloudmail_domains") or ""
+                        ).splitlines()
+                        if x.strip()
+                    ]
+                ),
+                "mail_api": (
+                    {
+                        "provider": "hotmail_api",
+                        "url": "https://www.appleemail.top",
+                        "accounts_file": str(
+                            SCRIPT_DIR / "hotmail_accounts_runtime.txt"
+                        ),
+                    }
+                    if mail_provider == "hotmail"
+                    else {
+                        "provider": "cloudmail",
+                        "url": str(merged_extra.get("cloudmail_api_url") or "").strip(),
+                        "admin_email": str(
+                            merged_extra.get("cloudmail_admin_email") or ""
+                        ).strip(),
+                        "admin_password": str(
+                            merged_extra.get("cloudmail_admin_password") or ""
+                        ).strip(),
+                        "domains": [
+                            x.strip()
+                            for x in str(
+                                merged_extra.get("cloudmail_domains") or ""
+                            ).splitlines()
+                            if x.strip()
+                        ],
+                    }
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    if hotmail_record:
+        (SCRIPT_DIR / "hotmail_accounts_runtime.txt").write_text(
+            "----".join(
+                [
+                    str(hotmail_record.get("email") or ""),
+                    str(hotmail_record.get("mailbox_password") or ""),
+                    str(hotmail_record.get("client_id") or ""),
+                    str(hotmail_record.get("refresh_token") or ""),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    reg_result = run_original_codex_register(
+        config_path=str(config_path),
+        hotmail_account_record=hotmail_record,
+        proxy=req.proxy,
+        headless=req.executor_type != "headed",
+    )
+    if not reg_result.get("ok"):
+        raise RuntimeError(
+            reg_result.get("stderr") or reg_result.get("stdout") or "原注册脚本失败"
+        )
+
+    last_line = str(reg_result.get("last_registered_line") or "")
+    parts = last_line.split("----")
+    if len(parts) < 2:
+        raise RuntimeError(f"无法解析原注册结果: {last_line}")
+    email, openai_password = parts[0], parts[1]
+    _log(task_id, f"Codex 原脚本注册成功: {email}")
+    bind_result = None
+    if mail_provider == "hotmail":
+        _mark_hotmail_status(
+            merged_extra,
+            email,
+            "pending_bind",
+            openai_password=openai_password,
+        )
+        bind_result = run_original_codex_oauth_bind(
+            email=email,
+            password=openai_password,
+            cpa_url=cpa_url,
+            cpa_key=cpa_key,
+            proxy=req.proxy,
+            headless=req.executor_type != "headed",
+            hotmail_account_record=hotmail_record,
+        )
+        if not bind_result.get("ok"):
+            raise RuntimeError(
+                bind_result.get("stderr")
+                or bind_result.get("stdout")
+                or "原 OAuth 脚本失败"
+            )
+        _mark_hotmail_status(
+            merged_extra,
+            email,
+            "success",
+            openai_password=openai_password,
+        )
+    _log(task_id, f"✓ Codex 原脚本完整流程成功: {email}")
+    return {
+        "email": email,
+        "password": openai_password,
+        "detail": {"register": reg_result, "bind": bind_result},
+    }
 
 
 def _create_task_record(
@@ -259,6 +453,13 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 _log(task_id, f"开始注册第 {i + 1}/{req.count} 个账号")
                 if _proxy:
                     _log(task_id, f"使用代理: {_proxy}")
+                if req.platform == "codex":
+                    result = _run_codex_via_original_scripts(task_id, req)
+                    current_email = result.get("email") or current_email
+                    _save_task_log(
+                        req.platform, current_email, "success", detail=result
+                    )
+                    return AttemptResult.success()
                 account = _platform.register(
                     email=req.email or None,
                     password=req.password,
@@ -292,6 +493,13 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                                 merged_extra.get("luckmail_base_url"),
                             )
                 saved_account = save_account(account)
+                if merged_extra.get("mail_provider") == "hotmail":
+                    _mark_hotmail_status(
+                        merged_extra,
+                        account.email,
+                        "success",
+                        openai_password=account.password,
+                    )
                 if _proxy:
                     proxy_pool.report_success(_proxy)
                 _log(task_id, f"✓ 注册成功: {account.email}")
@@ -317,6 +525,13 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
             except Exception as e:
                 if _proxy and proxy_pool is not None:
                     proxy_pool.report_fail(_proxy)
+                if merged_extra.get("mail_provider") == "hotmail":
+                    _mark_hotmail_status(
+                        merged_extra,
+                        current_email,
+                        "failed",
+                        error=str(e),
+                    )
                 _log(task_id, f"✗ 注册失败: {e}")
                 _save_task_log(
                     req.platform,

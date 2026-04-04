@@ -139,6 +139,7 @@ class BaseMailbox(ABC):
     def get_current_ids(self, account: MailboxAccount) -> set:
         """返回当前邮件 ID 集合（用于过滤旧邮件）"""
         ...
+
     def _yyds_safe_extract(self, text: str, pattern: str = None) -> Optional[str]:
         """通用验证码提取逻辑：若有捕获组则返回 group(1)，否则返回 group(0)"""
         import re
@@ -182,15 +183,17 @@ class BaseMailbox(ABC):
         text = str(raw or "")
         if not text:
             return ""
-            
+
         # [修复点 4]：只有在明确包含常见邮件 Header 时，才进行 \r\n\r\n 切分。
         # 否则会误删 MaliAPI 等直接返回的已解析 JSON 正文内容（遇到普通的正文换行就错误截断了）
-        if re.search(r"(?im)^(?:Return-Path|Received|Date|From|To|Subject|Content-Type):", text):
+        if re.search(
+            r"(?im)^(?:Return-Path|Received|Date|From|To|Subject|Content-Type):", text
+        ):
             if "\r\n\r\n" in text:
                 text = text.split("\r\n\r\n", 1)[1]
             elif "\n\n" in text:
                 text = text.split("\n\n", 1)[1]
-                
+
         try:
             # 处理 Quoted-Printable
             decoded_bytes = quopri.decodestring(text)
@@ -205,6 +208,7 @@ class BaseMailbox(ABC):
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
+
 
 def create_mailbox(
     provider: str, extra: dict = None, proxy: str = None
@@ -288,6 +292,11 @@ def create_mailbox(
             project_code=extra.get("luckmail_project_code", ""),
             email_type=extra.get("luckmail_email_type", ""),
             domain=extra.get("luckmail_domain", ""),
+        )
+    elif provider == "hotmail":
+        return HotmailMailbox(
+            api_url=extra.get("hotmail_api_url") or "https://www.appleemail.top",
+            mailbox_service_id=int(extra.get("hotmail_mailbox_service_id") or 0),
         )
     else:  # laoudo
         return LaoudoMailbox(
@@ -880,6 +889,136 @@ class CloudMailMailbox(BaseMailbox):
         )
 
 
+class HotmailMailbox(BaseMailbox):
+    def __init__(self, api_url: str, mailbox_service_id: int):
+        self.api_url = (api_url or "https://www.appleemail.top").rstrip("/")
+        self.mailbox_service_id = int(mailbox_service_id or 0)
+
+    def _load_account(self, email: str = ""):
+        from sqlmodel import Session, select
+        from .db import HotmailAccountModel, engine
+
+        if not self.mailbox_service_id:
+            raise RuntimeError("Hotmail 邮箱服务未配置 mailbox_service_id")
+
+        with Session(engine) as session:
+            if email:
+                row = session.exec(
+                    select(HotmailAccountModel)
+                    .where(
+                        HotmailAccountModel.mailbox_service_id
+                        == self.mailbox_service_id
+                    )
+                    .where(HotmailAccountModel.email == email)
+                ).first()
+                if row:
+                    return row
+
+            row = session.exec(
+                select(HotmailAccountModel)
+                .where(
+                    HotmailAccountModel.mailbox_service_id == self.mailbox_service_id
+                )
+                .where(HotmailAccountModel.register_status == "unregistered")
+                .order_by(HotmailAccountModel.created_at.asc())
+            ).first()
+            return row
+
+    def get_email(self) -> MailboxAccount:
+        row = self._load_account()
+        if not row:
+            raise RuntimeError("没有可用的未注册 Hotmail 账号")
+        return MailboxAccount(
+            email=row.email,
+            account_id=str(row.id or row.email),
+            extra={
+                "client_id": row.client_id,
+                "refresh_token": row.refresh_token,
+                "mailbox_password": row.mailbox_password,
+                "mailbox_service_id": row.mailbox_service_id,
+            },
+        )
+
+    def get_current_ids(self, account: MailboxAccount) -> set:
+        from services.hotmail_accounts import fetch_hotmail_latest_mail
+
+        try:
+            result = fetch_hotmail_latest_mail(
+                api_url=self.api_url,
+                email=account.email,
+                client_id=str((account.extra or {}).get("client_id") or ""),
+                refresh_token=str((account.extra or {}).get("refresh_token") or ""),
+            )
+            mail = result.get("mail") or {}
+            mail_id = str(mail.get("date") or "") + "|" + str(mail.get("subject") or "")
+            return {mail_id} if mail_id.strip("|") else set()
+        except Exception:
+            return set()
+
+    def wait_for_code(
+        self,
+        account: MailboxAccount,
+        keyword: str = "",
+        timeout: int = 120,
+        before_ids: set = None,
+        code_pattern: str = None,
+        **kwargs,
+    ) -> str:
+        from services.hotmail_accounts import fetch_hotmail_latest_mail
+
+        seen = set(before_ids or [])
+        exclude_codes = {
+            str(code) for code in (kwargs.get("exclude_codes") or set()) if code
+        }
+        otp_sent_at = kwargs.get("otp_sent_at")
+
+        def poll_once() -> Optional[str]:
+            result = fetch_hotmail_latest_mail(
+                api_url=self.api_url,
+                email=account.email,
+                client_id=str((account.extra or {}).get("client_id") or ""),
+                refresh_token=str((account.extra or {}).get("refresh_token") or ""),
+            )
+            mail = result.get("mail") or {}
+            mail_id = str(mail.get("date") or "") + "|" + str(mail.get("subject") or "")
+            if mail_id in seen:
+                return None
+            mail_ts = 0
+            try:
+                from datetime import datetime
+
+                raw = str(mail.get("date") or "").strip()
+                if raw:
+                    mail_ts = datetime.fromisoformat(
+                        raw.replace("Z", "+00:00")
+                    ).timestamp()
+            except Exception:
+                mail_ts = 0
+            if otp_sent_at and mail_ts and mail_ts < float(otp_sent_at) - 2:
+                return None
+            seen.add(mail_id)
+            content = " ".join(
+                [
+                    str(mail.get("subject") or ""),
+                    str(mail.get("text") or ""),
+                    str(mail.get("html") or ""),
+                ]
+            )
+            if keyword and keyword.lower() not in content.lower():
+                return None
+            code = self._safe_extract(content, code_pattern)
+            if code and code in exclude_codes:
+                return None
+            return code
+
+        return self._run_polling_wait(
+            timeout=timeout,
+            poll_interval=5,
+            poll_once=poll_once,
+            timeout_message=f"Hotmail 等待验证码超时 ({timeout}s)",
+        )
+
+
 class DuckMailMailbox(BaseMailbox):
     """DuckMail 自动生成邮箱（随机创建账号）"""
 
@@ -1205,7 +1344,9 @@ class MaliAPIMailbox(BaseMailbox):
                             str(message.get("snippet") or ""),
                         ]
                     ).strip()
-                    search_text = self._yyds_decode_raw_content(search_text) or search_text
+                    search_text = (
+                        self._yyds_decode_raw_content(search_text) or search_text
+                    )
                     search_text = re.sub(
                         r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
                         "",

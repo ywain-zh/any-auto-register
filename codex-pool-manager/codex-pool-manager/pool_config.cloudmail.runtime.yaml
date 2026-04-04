@@ -1,0 +1,26 @@
+{
+  "cliproxy": {
+    "url": "http://38.47.113.111:8317",
+    "key": "zyd035713"
+  },
+  "email_domains": [
+    "excelejs.us.ci",
+    "goodfine.ccwu.cc",
+    "hothho.us.ci",
+    "hotywian.us.ci",
+    "kroliss.us.ci"
+  ],
+  "mail_api": {
+    "provider": "cloudmail",
+    "url": "https://excelejs.us.ci",
+    "admin_email": "admin@excelejs.us.ci",
+    "admin_password": "admin123",
+    "domains": [
+      "excelejs.us.ci",
+      "goodfine.ccwu.cc",
+      "hothho.us.ci",
+      "hotywian.us.ci",
+      "kroliss.us.ci"
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Card,
   Form,
@@ -29,10 +30,13 @@ import { apiFetch } from '@/lib/utils'
 const { Text } = Typography
 
 export default function RegisterTaskPage() {
+  const navigate = useNavigate()
   const [form] = Form.useForm()
   const [task, setTask] = useState<any>(null)
   const [polling, setPolling] = useState(false)
   const [mailboxServices, setMailboxServices] = useState<any[]>([])
+  const [cpaRunning, setCpaRunning] = useState(false)
+  const [cpaOutput, setCpaOutput] = useState('')
   const { mode: chatgptRegistrationMode, setMode: setChatgptRegistrationMode } =
     usePersistentChatGPTRegistrationMode()
 
@@ -197,6 +201,19 @@ export default function RegisterTaskPage() {
   const platform = Form.useWatch('platform', form)
   const executorOptions = getExecutorOptions(platform)
 
+  const quickRunCpaCheck = async () => {
+    setCpaRunning(true)
+    try {
+      const res = await apiFetch('/cpa-monitor/run', {
+        method: 'POST',
+        body: JSON.stringify({ once: true, dry_run: false, enable_api_call_check: false, enable_disabled_recovery: true }),
+      })
+      setCpaOutput([res?.stdout, res?.stderr].filter(Boolean).join('\n'))
+    } finally {
+      setCpaRunning(false)
+    }
+  }
+
   useEffect(() => {
     const currentExecutor = form.getFieldValue('executor_type')
     const normalizedExecutor = normalizeExecutorForPlatform(platform, currentExecutor)
@@ -225,10 +242,17 @@ export default function RegisterTaskPage() {
         solver_url: 'http://localhost:8889',
       }}>
         <Card title="基本配置" style={{ marginBottom: 16 }}>
-          <Form.Item name="platform" label="平台" rules={[{ required: true }]}>
+          {(platform === 'chatgpt' || platform === 'codex') && (
+            <div style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Button onClick={() => navigate('/cpa-monitor')}>打开 CPA 监控台</Button>
+              <Button loading={cpaRunning} onClick={quickRunCpaCheck}>快速运行检查</Button>
+            </div>
+          )}
+          <Form.Item name="platform" label="平台" rules={[{ required: true }]}> 
             <Select
               options={[
                 { value: 'chatgpt', label: 'ChatGPT' },
+                { value: 'codex', label: 'Codex' },
                 { value: 'trae', label: 'Trae.ai' },
                 { value: 'cursor', label: 'Cursor' },
                 { value: 'kiro', label: 'Kiro' },
@@ -291,6 +315,7 @@ export default function RegisterTaskPage() {
                 { value: 'moemail', label: 'MoeMail (sall.cc)' },
                 { value: 'tempmail_lol', label: 'TempMail.lol' },
                 { value: 'cloudmail', label: 'Cloud Mail' },
+                { value: 'hotmail', label: 'Hotmail' },
                 { value: 'skymail', label: 'SkyMail (CloudMail)' },
                 { value: 'maliapi', label: 'YYDS Mail / MaliAPI' },
                 { value: 'gptmail', label: 'GPTMail' },
@@ -328,6 +353,13 @@ export default function RegisterTaskPage() {
               <Form.Item name="cloudmail_domains" label="邮箱域名列表">
                 <Input.TextArea rows={3} placeholder="goodfine.ccwu.cc&#10;example.com&#10;支持英文逗号或换行分隔" />
               </Form.Item>
+            </>
+          )}
+          {mailProvider === 'hotmail' && (
+            <>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                Hotmail 账号请先在“全局配置 / 邮箱服务”中导入，任务执行时会从未注册账号中自动取号。
+              </Text>
             </>
           )}
           {mailProvider === 'laoudo' && (
@@ -529,6 +561,12 @@ export default function RegisterTaskPage() {
           ) : null}
         </Card>
       )}
+
+      {(platform === 'chatgpt' || platform === 'codex') && cpaOutput ? (
+        <Card title="CPA 快速检查输出" style={{ marginTop: 16 }}>
+          <Input.TextArea value={cpaOutput} rows={12} readOnly style={{ fontFamily: 'monospace' }} />
+        </Card>
+      ) : null}
     </div>
   )
 }

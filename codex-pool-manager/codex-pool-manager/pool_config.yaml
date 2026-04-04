@@ -1,0 +1,61 @@
+# CLIProxyAPI 配置
+cliproxy:
+  url: "http://38.47.113.111:8317"
+  key: "zyd035713"
+
+# 号池管理
+pool:
+  min: 5               # 可用号低于此值时补充
+  target: 10            # 补充到此数量
+  check_interval: 60    # 检查间隔 (秒)
+
+# 并发与 IP
+workers: 3              # 并发线程数
+rotate_after_fails: 3   # 连续失败 N 次后换 IP
+sleep_min: 5
+sleep_max: 15
+
+# 偏好国家 (WARP + 5SIM 共用)
+# US 美国 / ID 印尼 / FR 法国 / NL 荷兰 / GB 英国 / DE 德国
+# 留空 = 不限
+preferred_country: ""
+
+# 邮箱域名 (* 替换为随机子域名)
+email_domains:
+  - "excelejs.us.ci"
+  - "goodfine.ccwu.cc"
+  - "hothho.us.ci"
+  - "hotywian.us.ci"
+  - "kroliss.us.ci"
+
+# 邮箱服务
+mail_api:
+  provider: "cloudmail"
+  url: "https://excelejs.us.ci"
+  admin_email: "admin@excelejs.us.ci"
+  admin_password: "admin123"
+  domains:
+    - "excelejs.us.ci"
+    - "goodfine.ccwu.cc"
+    - "hothho.us.ci"
+    - "hotywian.us.ci"
+    - "kroliss.us.ci"
+
+# Hotmail API 示例配置（切换时把 provider 改成 hotmail_api）
+# mail_api:
+#   provider: "hotmail_api"
+#   url: "https://www.appleemail.top"
+#   accounts_file: "..\hotmail_account\BBGGOOX26CXS8JRF_20260403_182608.txt"
+
+# 账号日志
+accounts_log: "/app/data/accounts_all.txt"
+
+# 5SIM 接码 (留空=遇到手机验证跳过)
+fivesim:
+  api_key: ""
+  country: ""
+  operator: "any"
+  max_price: 50
+
+# 浏览器
+headless: true

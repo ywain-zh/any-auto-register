@@ -1,0 +1,12 @@
+cliproxy:
+  url: "http://38.47.113.111:8317"
+  key: "zyd035713"
+
+email_domains: []
+
+mail_api:
+  provider: "hotmail_api"
+  url: "https://www.appleemail.top"
+  accounts_file: "hotmail_accounts_remaining_8.txt"
+
+headless: false

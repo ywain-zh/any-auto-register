@@ -1,0 +1,15 @@
+services:
+  # 一体化容器: 内置 WARP + Playwright + 注册/登录脚本
+  oauth_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.oauth
+    container_name: oauth_worker
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./data:/app/data
+      - ./warp-oauth-data:/var/lib/cloudflare-warp
+      - ./pool_config.yaml:/app/pool_config.yaml   # 配置文件挂载，改完即生效
+    restart: unless-stopped

@@ -1,0 +1,23 @@
+cliproxy:
+  url: "http://38.47.113.111:8317"
+  key: "zyd035713"
+
+pool:
+  min: 1
+  target: 1
+  check_interval: 60
+
+workers: 1
+rotate_after_fails: 3
+sleep_min: 5
+sleep_max: 10
+
+email_domains: []
+
+mail_api:
+  provider: "hotmail_api"
+  url: "https://www.appleemail.top"
+  accounts_file: "..\\..\\hotmail_account\\BBGGOOX26CXS8JRF_20260403_182608.txt"
+
+accounts_log: "data\\accounts_all_hotmail.txt"
+headless: false

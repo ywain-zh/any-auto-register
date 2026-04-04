@@ -19,6 +19,7 @@ import Proxies from '@/pages/Proxies'
 import Settings from '@/pages/Settings'
 import TaskHistory from '@/pages/TaskHistory'
 import Login from '@/pages/Login'
+import CpaMonitor from '@/pages/CpaMonitor'
 import { darkTheme, lightTheme } from './theme'
 import { apiFetch, clearToken, getToken } from '@/lib/utils'
 
@@ -92,6 +93,7 @@ function AppContent() {
     if (path === '/') return ['/']
     if (path.startsWith('/accounts')) return [path]
     if (path === '/history') return ['/history']
+    if (path === '/cpa-monitor') return ['/cpa-monitor']
     if (path === '/proxies') return ['/proxies']
     if (path === '/settings') return ['/settings']
     return ['/']
@@ -116,6 +118,11 @@ function AppContent() {
       key: '/history',
       icon: <HistoryOutlined />,
       label: '任务历史',
+    },
+    {
+      key: '/cpa-monitor',
+      icon: <DashboardOutlined />,
+      label: 'CPA 监控台',
     },
     {
       key: '/proxies',
@@ -231,6 +238,7 @@ function AppContent() {
             <Route path="/accounts/:platform" element={<Accounts />} />
             <Route path="/register" element={<RegisterTaskPage />} />
             <Route path="/history" element={<TaskHistory />} />
+            <Route path="/cpa-monitor" element={<CpaMonitor />} />
             <Route path="/proxies" element={<Proxies />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

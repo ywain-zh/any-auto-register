@@ -1270,7 +1270,7 @@ export default function Accounts() {
             <Form.Item name="register_delay_seconds" label="每个注册延迟(秒)" initialValue={0}>
               <InputNumber min={0} precision={1} step={0.5} style={{ width: '100%' }} placeholder="0 = 不延迟" />
             </Form.Item>
-            {currentPlatform === 'chatgpt' && (
+            {(currentPlatform === 'chatgpt' || currentPlatform === 'codex') && (
               <Form.Item label="ChatGPT Token 方案">
                 <ChatGPTRegistrationModeSwitch
                   mode={chatgptRegistrationMode}
@@ -1394,7 +1394,7 @@ export default function Accounts() {
                 </div>
               )
             })()}
-            {currentPlatform === 'chatgpt' ? (
+            {(currentPlatform === 'chatgpt' || currentPlatform === 'codex') ? (
               <DetailSection title="本地真实状态">
                 {currentAccount.chatgptLocal && Object.keys(currentAccount.chatgptLocal).length > 0 ? (
                   <LocalProbeSummary probe={currentAccount.chatgptLocal} />
