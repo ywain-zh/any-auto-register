@@ -21,7 +21,8 @@
 - [ChatGPT 专项能力](#chatgpt-专项能力)
 - [邮箱服务支持](#邮箱服务支持)
 - [快速开始](#快速开始)
-- [Docker 部署](#docker-部署)
+- [本地使用教程](docs/local-usage-tutorial.md)
+- [发布说明](RELEASE.md)
 - [插件与外部依赖](#插件与外部依赖)
 - [常见问题排查](#常见问题排查)
 - [项目结构](#项目结构)
@@ -197,6 +198,8 @@ CMD：
 ```bat
 start_backend.bat
 ```
+
+> `start_backend.ps1` 会优先解析 `any-auto-register` conda 环境；如果 PowerShell 会话里找不到 `conda`，请先执行 `conda init powershell` 并重开终端，或者直接用目标 Python 执行 `main.py`。
 
 #### 手动启动
 

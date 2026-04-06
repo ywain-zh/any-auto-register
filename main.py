@@ -20,6 +20,7 @@ from api.integrations import router as integrations_router
 from api.auth import router as auth_router
 from api.mailboxes import router as mailboxes_router
 from api.cpa_monitor import router as cpa_monitor_router
+from api.sub2api_monitor import router as sub2api_monitor_router
 
 EXPECTED_CONDA_ENV = os.getenv("APP_CONDA_ENV", "any-auto-register")
 
@@ -120,6 +121,7 @@ app.include_router(integrations_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(mailboxes_router, prefix="/api")
 app.include_router(cpa_monitor_router, prefix="/api")
+app.include_router(sub2api_monitor_router, prefix="/api")
 
 
 @app.get("/api/solver/status")

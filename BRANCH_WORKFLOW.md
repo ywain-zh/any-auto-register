@@ -118,9 +118,17 @@ git merge custom/dev
 推荐流程：
 
 1. 本地开发：`custom/dev`
-2. 本地验证通过后合并：`release`
-3. 推送到你的 fork：`origin/release`
-4. 服务器只拉 `release`
+2. 本地验证通过后，先更新 `RELEASE.md` 记录本次发布内容
+3. 合并到：`release`
+4. 推送到你的 fork：`origin/release`
+5. 服务器只拉 `release`
+
+补充约定：
+
+- `RELEASE.md` 用来记录每次发布包含的功能、修复和部署检查项
+- 每次准备 push `release` 前，都应同步更新 `RELEASE.md`
+- 本次新增的 Sub2API 监控台部署后优先检查 `/sub2api-monitor`
+- 如果服务器没有初始化 PowerShell `conda`，不要依赖 `start_backend.ps1`，直接用目标 Python 启动 `main.py`
 
 ## Docker Deployment
 

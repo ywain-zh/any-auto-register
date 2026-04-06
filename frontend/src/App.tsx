@@ -20,6 +20,7 @@ import Settings from '@/pages/Settings'
 import TaskHistory from '@/pages/TaskHistory'
 import Login from '@/pages/Login'
 import CpaMonitor from '@/pages/CpaMonitor'
+import Sub2ApiMonitor from '@/pages/Sub2ApiMonitor'
 import { darkTheme, lightTheme } from './theme'
 import { apiFetch, clearToken, getToken } from '@/lib/utils'
 
@@ -94,6 +95,7 @@ function AppContent() {
     if (path.startsWith('/accounts')) return [path]
     if (path === '/history') return ['/history']
     if (path === '/cpa-monitor') return ['/cpa-monitor']
+    if (path === '/sub2api-monitor') return ['/sub2api-monitor']
     if (path === '/proxies') return ['/proxies']
     if (path === '/settings') return ['/settings']
     return ['/']
@@ -123,6 +125,11 @@ function AppContent() {
       key: '/cpa-monitor',
       icon: <DashboardOutlined />,
       label: 'CPA 监控台',
+    },
+    {
+      key: '/sub2api-monitor',
+      icon: <DashboardOutlined />,
+      label: 'Sub2API 监控台',
     },
     {
       key: '/proxies',
@@ -239,6 +246,7 @@ function AppContent() {
             <Route path="/register" element={<RegisterTaskPage />} />
             <Route path="/history" element={<TaskHistory />} />
             <Route path="/cpa-monitor" element={<CpaMonitor />} />
+            <Route path="/sub2api-monitor" element={<Sub2ApiMonitor />} />
             <Route path="/proxies" element={<Proxies />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
