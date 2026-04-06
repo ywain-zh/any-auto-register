@@ -14,7 +14,7 @@
 
 - 发布分支：`release`
 - 开发来源：`custom/dev`
-- 发布提交：`<pending>`
+- 发布提交：以本次 `release` 分支最新 HEAD 为准
 
 ### 本次内容
 
