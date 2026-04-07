@@ -176,11 +176,28 @@ def _normalize_solver(solver: str | None) -> str:
 
 
 def _trigger_register(missing_count: int, *, config: CpaMaintenanceConfig, remaining_count: int) -> dict[str, Any]:
+    from sqlmodel import Session, select
+
     from api.tasks import RegisterTaskRequest, enqueue_register_task, has_active_register_task
+    from core.db import MailboxServiceModel, engine
 
     if has_active_register_task(platform="chatgpt", source=AUTO_REGISTER_SOURCE):
         print("[CPA] 已存在进行中的自动补注册任务，跳过本轮补注册")
         return {"triggered": False, "reason": "task_running"}
+
+    mailbox_service_id = None
+    with Session(engine) as session:
+        mailbox_item = session.exec(
+            select(MailboxServiceModel)
+            .where(MailboxServiceModel.is_active == True)
+            .order_by(MailboxServiceModel.id.asc())
+        ).first()
+        if mailbox_item:
+            mailbox_service_id = mailbox_item.id
+
+    if not mailbox_service_id:
+        print("[CPA] 未找到可用的邮箱服务实例，跳过自动补注册")
+        return {"triggered": False, "reason": "no_mailbox_service"}
 
     config_store = _get_config_store()
     req = RegisterTaskRequest(
@@ -190,7 +207,23 @@ def _trigger_register(missing_count: int, *, config: CpaMaintenanceConfig, remai
         register_delay_seconds=config.register_delay_seconds,
         executor_type=_normalize_executor(config_store.get("default_executor", "protocol")),
         captcha_solver=_normalize_solver(config_store.get("default_captcha_solver", "yescaptcha")),
-        extra={},
+        extra={
+            "mailbox_service_id": mailbox_service_id,
+            "yescaptcha_key": config_store.get("yescaptcha_key", ""),
+            "solver_url": config_store.get("solver_url", ""),
+            "smstome_cookie": config_store.get("smstome_cookie", ""),
+            "smstome_country_slugs": config_store.get("smstome_country_slugs", ""),
+            "smstome_phone_attempts": config_store.get("smstome_phone_attempts", ""),
+            "smstome_otp_timeout_seconds": config_store.get(
+                "smstome_otp_timeout_seconds", ""
+            ),
+            "smstome_poll_interval_seconds": config_store.get(
+                "smstome_poll_interval_seconds", ""
+            ),
+            "smstome_sync_max_pages_per_country": config_store.get(
+                "smstome_sync_max_pages_per_country", ""
+            ),
+        },
     )
     task_id = enqueue_register_task(
         req,

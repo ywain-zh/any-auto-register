@@ -7,7 +7,6 @@ import {
   InputNumber,
   Select,
   Button,
-  Checkbox,
   Tag,
   Space,
   Typography,
@@ -22,7 +21,6 @@ import {
 import { ChatGPTRegistrationModeSwitch } from '@/components/ChatGPTRegistrationModeSwitch'
 import { TaskLogPanel } from '@/components/TaskLogPanel'
 import { usePersistentChatGPTRegistrationMode } from '@/hooks/usePersistentChatGPTRegistrationMode'
-import { parseBooleanConfigValue } from '@/lib/configValueParsers'
 import { buildChatGPTRegistrationRequestAdapter } from '@/lib/chatgptRegistrationRequestAdapter'
 import { getExecutorOptions, normalizeExecutorForPlatform } from '@/lib/platformExecutorOptions'
 import { apiFetch } from '@/lib/utils'
@@ -48,62 +46,22 @@ export default function RegisterTaskPage() {
       form.setFieldsValue({
         executor_type: normalizeExecutorForPlatform(currentPlatform, cfg.default_executor),
         captcha_solver: cfg.default_captcha_solver || 'yescaptcha',
-        mail_provider: cfg.mail_provider || 'luckmail',
         yescaptcha_key: cfg.yescaptcha_key || '',
-        moemail_api_url: cfg.moemail_api_url || '',
-        cloudmail_api_url: cfg.cloudmail_api_url || '',
-        cloudmail_admin_email: cfg.cloudmail_admin_email || '',
-        cloudmail_admin_password: cfg.cloudmail_admin_password || '',
-        cloudmail_domains: cfg.cloudmail_domains || '',
-        skymail_api_base: cfg.skymail_api_base || 'https://api.skymail.ink',
-        skymail_token: cfg.skymail_token || '',
-        skymail_domain: cfg.skymail_domain || '',
-        laoudo_auth: cfg.laoudo_auth || '',
-        laoudo_email: cfg.laoudo_email || '',
-        laoudo_account_id: cfg.laoudo_account_id || '',
-        gptmail_base_url: cfg.gptmail_base_url || 'https://mail.chatgpt.org.uk',
-        gptmail_api_key: cfg.gptmail_api_key || '',
-        gptmail_domain: cfg.gptmail_domain || '',
-        maliapi_base_url: cfg.maliapi_base_url || 'https://maliapi.215.im/v1',
-        maliapi_api_key: cfg.maliapi_api_key || '',
-        maliapi_domain: cfg.maliapi_domain || '',
-        maliapi_auto_domain_strategy: cfg.maliapi_auto_domain_strategy || 'balanced',
-        duckmail_api_url: cfg.duckmail_api_url || '',
-        duckmail_provider_url: cfg.duckmail_provider_url || '',
-        duckmail_bearer: cfg.duckmail_bearer || '',
-        freemail_api_url: cfg.freemail_api_url || '',
-        freemail_admin_token: cfg.freemail_admin_token || '',
-        freemail_username: cfg.freemail_username || '',
-        freemail_password: cfg.freemail_password || '',
-        cfworker_api_url: cfg.cfworker_api_url || '',
-        cfworker_admin_token: cfg.cfworker_admin_token || '',
-        cfworker_custom_auth: cfg.cfworker_custom_auth || '',
-        cfworker_domain_override: '',
-        cfworker_subdomain: cfg.cfworker_subdomain || '',
-        cfworker_random_subdomain: parseBooleanConfigValue(cfg.cfworker_random_subdomain),
-        cfworker_fingerprint: cfg.cfworker_fingerprint || '',
         smstome_cookie: cfg.smstome_cookie || '',
         smstome_country_slugs: cfg.smstome_country_slugs || '',
         smstome_phone_attempts: cfg.smstome_phone_attempts || '',
         smstome_otp_timeout_seconds: cfg.smstome_otp_timeout_seconds || '',
         smstome_poll_interval_seconds: cfg.smstome_poll_interval_seconds || '',
         smstome_sync_max_pages_per_country: cfg.smstome_sync_max_pages_per_country || '',
-        luckmail_base_url: cfg.luckmail_base_url || 'https://mails.luckyous.com/',
-        luckmail_api_key: cfg.luckmail_api_key || '',
-        luckmail_email_type: cfg.luckmail_email_type || '',
-        luckmail_domain: cfg.luckmail_domain || '',
       })
       setProxyValue(cfg.default_proxy || '')
     })
     apiFetch('/mailboxes')
       .then((items) => {
-        setMailboxServices([
-          { id: 'builtin:tempmail_lol', name: 'TempMail.lol（自动生成）', provider: 'tempmail_lol', is_active: true },
-          ...((items || []).filter((item: any) => item.is_active)),
-        ])
+        setMailboxServices((items || []).filter((item: any) => item.is_active))
       })
       .catch(() => {
-        setMailboxServices([{ id: 'builtin:tempmail_lol', name: 'TempMail.lol（自动生成）', provider: 'tempmail_lol', is_active: true }])
+        setMailboxServices([])
       })
   }, [form])
 
@@ -116,52 +74,15 @@ export default function RegisterTaskPage() {
     setLastSubmittedProxy(values.proxy || '')
     const registerExtra = {
       mailbox_service_id: values.mailbox_service_id,
-      mail_provider: values.mail_provider,
       proxy: values.proxy,
-      cloudmail_api_url: values.cloudmail_api_url,
-      cloudmail_admin_email: values.cloudmail_admin_email,
-      cloudmail_admin_password: values.cloudmail_admin_password,
-      cloudmail_domains: values.cloudmail_domains,
-      laoudo_auth: values.laoudo_auth,
-      laoudo_email: values.laoudo_email,
-      laoudo_account_id: values.laoudo_account_id,
-      gptmail_base_url: values.gptmail_base_url,
-      gptmail_api_key: values.gptmail_api_key,
-      gptmail_domain: values.gptmail_domain,
-      maliapi_base_url: values.maliapi_base_url,
-      maliapi_api_key: values.maliapi_api_key,
-      maliapi_domain: values.maliapi_domain,
-      maliapi_auto_domain_strategy: values.maliapi_auto_domain_strategy,
-      moemail_api_url: values.moemail_api_url,
-      skymail_api_base: values.skymail_api_base,
-      skymail_token: values.skymail_token,
-      skymail_domain: values.skymail_domain,
-      duckmail_api_url: values.duckmail_api_url,
-      duckmail_provider_url: values.duckmail_provider_url,
-      duckmail_bearer: values.duckmail_bearer,
-      freemail_api_url: values.freemail_api_url,
-      freemail_admin_token: values.freemail_admin_token,
-      freemail_username: values.freemail_username,
-      freemail_password: values.freemail_password,
-      cfworker_api_url: values.cfworker_api_url,
-      cfworker_admin_token: values.cfworker_admin_token,
-      cfworker_custom_auth: values.cfworker_custom_auth,
-      cfworker_domain_override: values.cfworker_domain_override,
-      cfworker_subdomain: values.cfworker_subdomain,
-      cfworker_random_subdomain: values.cfworker_random_subdomain,
-      cfworker_fingerprint: values.cfworker_fingerprint,
+      yescaptcha_key: values.yescaptcha_key,
+      solver_url: values.solver_url,
       smstome_cookie: values.smstome_cookie,
       smstome_country_slugs: values.smstome_country_slugs,
       smstome_phone_attempts: values.smstome_phone_attempts,
       smstome_otp_timeout_seconds: values.smstome_otp_timeout_seconds,
       smstome_poll_interval_seconds: values.smstome_poll_interval_seconds,
       smstome_sync_max_pages_per_country: values.smstome_sync_max_pages_per_country,
-      luckmail_base_url: values.luckmail_base_url,
-      luckmail_api_key: values.luckmail_api_key,
-      luckmail_email_type: values.luckmail_email_type,
-      luckmail_domain: values.luckmail_domain,
-      yescaptcha_key: values.yescaptcha_key,
-      solver_url: values.solver_url,
     }
     const chatgptRegistrationRequestAdapter =
       buildChatGPTRegistrationRequestAdapter(
@@ -205,7 +126,6 @@ export default function RegisterTaskPage() {
     }, 2000)
   }
 
-  const mailProvider = Form.useWatch('mail_provider', form)
   const captchaSolver = Form.useWatch('captcha_solver', form)
   const platform = Form.useWatch('platform', form)
   const executorOptions = getExecutorOptions(platform)
@@ -242,12 +162,8 @@ export default function RegisterTaskPage() {
         platform: 'trae',
         executor_type: 'protocol',
         captcha_solver: 'yescaptcha',
-        mail_provider: 'luckmail',
-        gptmail_base_url: 'https://mail.chatgpt.org.uk',
         count: 1,
         register_delay_seconds: 0,
-        maliapi_base_url: 'https://maliapi.215.im/v1',
-        maliapi_auto_domain_strategy: 'balanced',
         solver_url: 'http://localhost:8889',
       }}>
         <Card title="基本配置" style={{ marginBottom: 16 }}>
@@ -323,7 +239,12 @@ export default function RegisterTaskPage() {
         </Card>
 
         <Card title="邮箱配置" style={{ marginBottom: 16 }}>
-          <Form.Item name="mailbox_service_id" label="邮箱服务实例">
+          <Form.Item
+            name="mailbox_service_id"
+            label="邮箱服务实例"
+            rules={[{ required: true, message: '请选择邮箱服务实例' }]}
+            extra="注册时将直接使用这里选择的邮箱服务实例配置。"
+          >
             <Select
               allowClear
               placeholder="选择已配置的邮箱服务实例"
@@ -333,161 +254,6 @@ export default function RegisterTaskPage() {
               }))}
             />
           </Form.Item>
-          <Form.Item name="mail_provider" label="邮箱服务" rules={[{ required: true }]}> 
-            <Select
-              options={[
-                { value: 'luckmail', label: 'LuckMail' },
-                { value: 'moemail', label: 'MoeMail (sall.cc)' },
-                { value: 'tempmail_lol', label: 'TempMail.lol' },
-                { value: 'cloudmail', label: 'Cloud Mail' },
-                { value: 'hotmail', label: 'Hotmail' },
-                { value: 'skymail', label: 'SkyMail (CloudMail)' },
-                { value: 'maliapi', label: 'YYDS Mail / MaliAPI' },
-                { value: 'gptmail', label: 'GPTMail' },
-                { value: 'duckmail', label: 'DuckMail' },
-                { value: 'freemail', label: 'Freemail' },
-                { value: 'laoudo', label: 'Laoudo' },
-                { value: 'cfworker', label: 'CF Worker' },
-              ]}
-            />
-          </Form.Item>
-          {mailProvider === 'skymail' && (
-            <>
-              <Form.Item name="skymail_api_base" label="API Base">
-                <Input placeholder="https://api.skymail.ink" />
-              </Form.Item>
-              <Form.Item name="skymail_token" label="Authorization Token">
-                <Input.Password placeholder="Bearer xxxxx" />
-              </Form.Item>
-              <Form.Item name="skymail_domain" label="邮箱域名">
-                <Input placeholder="mail.example.com" />
-              </Form.Item>
-            </>
-          )}
-          {mailProvider === 'cloudmail' && (
-            <>
-              <Form.Item name="cloudmail_api_url" label="API URL">
-                <Input placeholder="https://mail.example.com" />
-              </Form.Item>
-              <Form.Item name="cloudmail_admin_email" label="管理员邮箱">
-                <Input placeholder="admin@example.com" />
-              </Form.Item>
-              <Form.Item name="cloudmail_admin_password" label="管理员密码">
-                <Input.Password />
-              </Form.Item>
-              <Form.Item name="cloudmail_domains" label="邮箱域名列表">
-                <Input.TextArea rows={3} placeholder="goodfine.ccwu.cc&#10;example.com&#10;支持英文逗号或换行分隔" />
-              </Form.Item>
-            </>
-          )}
-          {mailProvider === 'hotmail' && (
-            <>
-              <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-                Hotmail 账号请先在“全局配置 / 邮箱服务”中导入，任务执行时会从未注册账号中自动取号。
-              </Text>
-            </>
-          )}
-          {mailProvider === 'laoudo' && (
-            <>
-              <Form.Item name="laoudo_email" label="邮箱地址">
-                <Input placeholder="xxx@laoudo.com" />
-              </Form.Item>
-              <Form.Item name="laoudo_account_id" label="Account ID">
-                <Input placeholder="563" />
-              </Form.Item>
-              <Form.Item name="laoudo_auth" label="JWT Token">
-                <Input placeholder="eyJ..." />
-              </Form.Item>
-            </>
-          )}
-          {mailProvider === 'maliapi' && (
-            <>
-              <Form.Item name="maliapi_base_url" label="API URL">
-                <Input placeholder="https://maliapi.215.im/v1" />
-              </Form.Item>
-              <Form.Item name="maliapi_api_key" label="API Key">
-                <Input.Password placeholder="AC-..." />
-              </Form.Item>
-              <Form.Item name="maliapi_domain" label="邮箱域名（可选）">
-                <Input placeholder="example.com" />
-              </Form.Item>
-              <Form.Item name="maliapi_auto_domain_strategy" label="自动域名策略">
-                <Select
-                  options={[
-                    { value: 'balanced', label: 'balanced' },
-                    { value: 'prefer_owned', label: 'prefer_owned' },
-                    { value: 'prefer_public', label: 'prefer_public' },
-                  ]}
-                />
-              </Form.Item>
-            </>
-          )}
-          {mailProvider === 'gptmail' && (
-            <>
-              <Form.Item name="gptmail_base_url" label="API URL">
-                <Input placeholder="https://mail.chatgpt.org.uk" />
-              </Form.Item>
-              <Form.Item name="gptmail_api_key" label="API Key">
-                <Input.Password placeholder="gpt-test" />
-              </Form.Item>
-              <Form.Item
-                name="gptmail_domain"
-                label="邮箱域名（可选）"
-                extra="已知当前可用域名时可直接本地拼装随机地址，省掉一次 generate-email 请求"
-              >
-                <Input placeholder="example.com" />
-              </Form.Item>
-            </>
-          )}
-          {mailProvider === 'cfworker' && (
-            <>
-              <Form.Item name="cfworker_api_url" label="API URL">
-                <Input placeholder="https://apimail.example.com" />
-              </Form.Item>
-              <Form.Item name="cfworker_admin_token" label="Admin Token">
-                <Input placeholder="abc123,,,abc" />
-              </Form.Item>
-              <Form.Item name="cfworker_custom_auth" label="Site Password">
-                <Input.Password placeholder="private site password" />
-              </Form.Item>
-              <Form.Item
-                name="cfworker_domain_override"
-                label="单次任务指定域名（可选）"
-                extra="留空时将从设置页已启用的域名列表中随机选择。"
-              >
-                <Input placeholder="example.com" />
-              </Form.Item>
-              <Form.Item
-                name="cfworker_subdomain"
-                label="子域名（可选）"
-                extra="填写后将生成 xxx@子域名.根域名；若启用随机子域名，则会生成 xxx@随机值.子域名.根域名。"
-              >
-                <Input placeholder="mail / pool-a" />
-              </Form.Item>
-              <Form.Item name="cfworker_random_subdomain" label="随机子域名" valuePropName="checked">
-                <Checkbox>每次注册前随机生成一层子域名</Checkbox>
-              </Form.Item>
-              <Form.Item name="cfworker_fingerprint" label="Fingerprint (可选)">
-                <Input placeholder="cfb82279f..." />
-              </Form.Item>
-            </>
-          )}
-          {mailProvider === 'luckmail' && (
-            <>
-              <Form.Item name="luckmail_base_url" label="平台地址">
-                <Input placeholder="https://mails.luckyous.com" />
-              </Form.Item>
-              <Form.Item name="luckmail_api_key" label="API Key">
-                <Input.Password placeholder="ak_..." />
-              </Form.Item>
-              <Form.Item name="luckmail_email_type" label="邮箱类型（可选）">
-                <Input placeholder="ms_graph / ms_imap" />
-              </Form.Item>
-              <Form.Item name="luckmail_domain" label="邮箱域名（可选）">
-                <Input placeholder="outlook.com" />
-              </Form.Item>
-            </>
-          )}
         </Card>
 
         {platform === 'chatgpt' && (

@@ -21,6 +21,8 @@
       "hothho.us.ci",
       "hotywian.us.ci",
       "kroliss.us.ci"
-    ]
-  }
+    ],
+    "base_dir": "C:\\Users\\zhouyuan\\Desktop\\any-auto-register-main\\codex-pool-manager\\codex-pool-manager"
+  },
+  "mailbox_otp_timeout_seconds": 180
 }

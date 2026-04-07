@@ -55,34 +55,52 @@ def _ensure_task_mutable(task_id: str) -> None:
         raise HTTPException(409, "任务已结束，无法再执行控制操作")
 
 
-def _prepare_register_request(req: RegisterTaskRequest) -> RegisterTaskRequest:
-    from core.config_store import config_store
+def _resolve_mailbox_runtime(extra: dict) -> dict:
+    resolved = {
+        k: v for k, v in (extra or {}).items() if v is not None and v != ""
+    }
 
+    mailbox_service_id = resolved.get("mailbox_service_id")
+    if mailbox_service_id:
+        if isinstance(mailbox_service_id, str) and mailbox_service_id.startswith(
+            "builtin:"
+        ):
+            resolved["mail_provider"] = mailbox_service_id.split(":", 1)[1]
+        else:
+            try:
+                mailbox_service_pk = int(mailbox_service_id)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "邮箱服务实例 ID 非法")
+            with Session(engine) as session:
+                mailbox_item = session.get(MailboxServiceModel, mailbox_service_pk)
+                if not mailbox_item or not mailbox_item.is_active:
+                    raise HTTPException(400, "所选邮箱服务不存在或已停用")
+                resolved["mailbox_service_id"] = mailbox_item.id
+                resolved["mail_provider"] = mailbox_item.provider
+                resolved.update(json.loads(mailbox_item.config_json or "{}"))
+                if mailbox_item.provider == "hotmail":
+                    resolved["hotmail_mailbox_service_id"] = mailbox_item.id
+
+    mail_provider = str(resolved.get("mail_provider") or "").strip()
+    if not mail_provider:
+        raise HTTPException(400, "请选择可用的邮箱服务实例")
+
+    if mail_provider == "luckmail":
+        return resolved
+
+    resolved.pop("luckmail_project_code", None)
+    return resolved
+
+
+def _prepare_register_request(req: RegisterTaskRequest) -> RegisterTaskRequest:
     req_data = req.model_dump()
     req_data["extra"] = deepcopy(req_data.get("extra") or {})
     if not req_data.get("proxy") and req_data["extra"].get("proxy"):
         req_data["proxy"] = req_data["extra"].get("proxy")
     prepared = RegisterTaskRequest(**req_data)
+    prepared.extra = _resolve_mailbox_runtime(prepared.extra)
 
-    mailbox_service_id = prepared.extra.get("mailbox_service_id")
-    if mailbox_service_id:
-        if isinstance(mailbox_service_id, str) and mailbox_service_id.startswith(
-            "builtin:"
-        ):
-            prepared.extra["mail_provider"] = mailbox_service_id.split(":", 1)[1]
-        else:
-            with Session(engine) as session:
-                mailbox_item = session.get(MailboxServiceModel, int(mailbox_service_id))
-                if not mailbox_item or not mailbox_item.is_active:
-                    raise HTTPException(400, "所选邮箱服务不存在或已停用")
-                prepared.extra["mail_provider"] = mailbox_item.provider
-                prepared.extra.update(json.loads(mailbox_item.config_json or "{}"))
-                prepared.extra["hotmail_mailbox_service_id"] = mailbox_item.id
-
-    mail_provider = prepared.extra.get("mail_provider") or config_store.get(
-        "mail_provider", ""
-    )
-    if mail_provider == "luckmail":
+    if prepared.extra.get("mail_provider") == "luckmail":
         platform = prepared.platform
         if platform in ("tavily", "openblocklabs"):
             raise HTTPException(400, f"LuckMail 渠道暂时不支持 {platform} 项目注册")
@@ -100,13 +118,16 @@ def _prepare_register_request(req: RegisterTaskRequest) -> RegisterTaskRequest:
 
 
 def _mark_hotmail_status(
-    extra: dict, email: str, status: str, *, openai_password: str = "", error: str = ""
+    extra: dict,
+    email: str,
+    status: str,
+    *,
+    openai_password: str = "",
+    error: str = "",
 ) -> None:
-    mailbox_service_id = int(extra.get("hotmail_mailbox_service_id") or 0)
+    mailbox_service_id = int((extra or {}).get("hotmail_mailbox_service_id") or 0)
     if not mailbox_service_id or not email:
         return
-    from sqlmodel import Session
-    from core.db import engine
     from services.hotmail_accounts import update_hotmail_registration_status
 
     with Session(engine) as session:
@@ -126,11 +147,12 @@ def _run_codex_via_original_scripts(
     from core.config_store import config_store
     from sqlmodel import Session, select
     from services.codex_script_bridge import (
-        ROOT_DIR as BRIDGE_ROOT,
         SCRIPT_DIR,
-        run_original_codex_oauth_bind,
+        resolve_codex_bind_target,
+        run_codex_oauth_bind,
         run_original_codex_register,
     )
+    from api.mailboxes import build_codex_runtime_mail_api
     from core.db import HotmailAccountModel
 
     merged_extra = config_store.get_all().copy()
@@ -138,10 +160,23 @@ def _run_codex_via_original_scripts(
         {k: v for k, v in req.extra.items() if v is not None and v != ""}
     )
     mail_provider = str(merged_extra.get("mail_provider") or "").strip().lower()
-    mailbox_service_id = int(merged_extra.get("hotmail_mailbox_service_id") or 0)
-    if mail_provider not in {"hotmail", "cloudmail"}:
-        raise RuntimeError("Codex 原脚本桥接当前仅支持 Hotmail / CloudMail 服务实例")
+    mailbox_service_id_raw = (
+        merged_extra.get("hotmail_mailbox_service_id")
+        or merged_extra.get("mailbox_service_id")
+        or 0
+    )
+    if isinstance(mailbox_service_id_raw, str) and mailbox_service_id_raw.startswith(
+        "builtin:"
+    ):
+        mailbox_service_id = 0
+        if not mail_provider:
+            mail_provider = mailbox_service_id_raw.split(":", 1)[1].strip().lower()
+    else:
+        mailbox_service_id = int(mailbox_service_id_raw or 0)
+    if not mailbox_service_id and mail_provider != "tempmail_lol":
+        raise RuntimeError("Codex 桥接缺少邮箱服务实例")
 
+    bind_target = resolve_codex_bind_target(merged_extra)
     cpa_url = str(
         merged_extra.get("cliproxyapi_base_url")
         or merged_extra.get("cpa_api_url")
@@ -154,7 +189,12 @@ def _run_codex_via_original_scripts(
         or merged_extra.get("codex_proxy_key")
         or ""
     ).strip()
-    if not cpa_url or not cpa_key:
+    sub2api_url = str(merged_extra.get("sub2api_api_url") or "").strip()
+    sub2api_key = str(merged_extra.get("sub2api_api_key") or "").strip()
+    if bind_target == "sub2api":
+        if not sub2api_url or not sub2api_key:
+            raise RuntimeError("未配置 Sub2API 地址或 API Key")
+    elif not cpa_url or not cpa_key:
         raise RuntimeError("未配置 CLIProxyAPI / CPA 地址或管理口令")
 
     row = None
@@ -178,41 +218,26 @@ def _run_codex_via_original_scripts(
         _log(task_id, f"Codex 原脚本桥接将使用邮箱: {row.email}")
     _log(task_id, f"Codex 原脚本桥接收到代理: {proxy}")
 
-    runtime_email_domains = (
-        []
-        if mail_provider == "hotmail"
-        else [
-            x.strip()
-            for x in str(merged_extra.get("cloudmail_domains") or "").splitlines()
-            if x.strip()
-        ]
+    runtime_mail_api, bridge_state = build_codex_runtime_mail_api(
+        mailbox_service_id=mailbox_service_id,
+        provider=mail_provider,
+        merged_extra=merged_extra,
+        proxy=proxy,
     )
-    runtime_mail_api = (
-        {
-            "provider": "hotmail_api",
-            "url": "https://www.appleemail.top",
-            "accounts_file": str(SCRIPT_DIR / "hotmail_accounts_runtime.txt"),
-            "base_dir": str(SCRIPT_DIR),
-        }
-        if mail_provider == "hotmail"
-        else {
-            "provider": "cloudmail",
-            "url": str(merged_extra.get("cloudmail_api_url") or "").strip(),
-            "admin_email": str(merged_extra.get("cloudmail_admin_email") or "").strip(),
-            "admin_password": str(
-                merged_extra.get("cloudmail_admin_password") or ""
-            ).strip(),
-            "domains": runtime_email_domains,
-            "base_dir": str(SCRIPT_DIR),
-        }
-    )
-    config_path = SCRIPT_DIR / f"pool_config.{mail_provider}.runtime.yaml"
+    runtime_email_domains = runtime_mail_api.get("domains") or []
+    config_path = SCRIPT_DIR / f"pool_config.{mail_provider or 'mailbox'}.runtime.yaml"
     config_path.write_text(
         json.dumps(
             {
                 "cliproxy": {"url": cpa_url, "key": cpa_key},
                 "email_domains": runtime_email_domains,
                 "mail_api": runtime_mail_api,
+                "mailbox_otp_timeout_seconds": merged_extra.get(
+                    "mailbox_otp_timeout_seconds"
+                )
+                or merged_extra.get("email_otp_timeout_seconds")
+                or merged_extra.get("otp_timeout")
+                or 180,
             },
             ensure_ascii=False,
             indent=2,
@@ -234,6 +259,11 @@ def _run_codex_via_original_scripts(
         )
 
     is_headless = req.executor_type != "headed"
+    if bridge_state:
+        _log(
+            task_id,
+            f"[CODEX] 已启用通用邮箱桥接: provider={mail_provider}, email={bridge_state.get('email')}",
+        )
     _log(
         task_id,
         f"[CODEX] executor_type={req.executor_type}, headless={str(is_headless).lower()}",
@@ -259,7 +289,7 @@ def _run_codex_via_original_scripts(
         raise RuntimeError(f"无法解析原注册结果: {last_line}")
     email, openai_password = parts[0], parts[1]
     _log(task_id, f"[CODEX] 注册阶段成功: {email}")
-    _log(task_id, f"[CODEX] 开始执行 OAuth / CPA 绑定，provider={mail_provider}")
+    _log(task_id, f"[CODEX] 开始执行 OAuth / {bind_target.upper()} 绑定，provider={mail_provider}")
     bind_result = None
     if mail_provider == "hotmail":
         _mark_hotmail_status(
@@ -268,23 +298,29 @@ def _run_codex_via_original_scripts(
             "pending_bind",
             openai_password=openai_password,
         )
-    bind_result = run_original_codex_oauth_bind(
+    bind_result = run_codex_oauth_bind(
+        bind_target=bind_target,
         email=email,
         password=openai_password,
         cpa_url=cpa_url,
         cpa_key=cpa_key,
+        sub2api_url=sub2api_url,
+        sub2api_key=sub2api_key,
         proxy=proxy,
         headless=is_headless,
         mail_api_config=runtime_mail_api,
         hotmail_account_record=hotmail_record,
         log_fn=lambda msg: _log(task_id, msg),
     )
-    if not bind_result.get("ok"):
+    if not bind_result.get("ok") and not bind_result.get("needs_phone"):
         raise RuntimeError(
             bind_result.get("stderr")
             or bind_result.get("stdout")
+            or bind_result.get("message")
             or "原 OAuth 脚本失败"
         )
+    if bind_result.get("needs_phone"):
+        raise RuntimeError(bind_result.get("message") or "OpenAI 要求绑定手机号")
     if mail_provider == "hotmail":
         _mark_hotmail_status(
             merged_extra,
@@ -412,15 +448,9 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
         PlatformCls = get(req.platform)
 
         def _build_mailbox(proxy: Optional[str]):
-            from core.config_store import config_store
-
-            merged_extra = config_store.get_all().copy()
-            merged_extra.update(
-                {k: v for k, v in req.extra.items() if v is not None and v != ""}
-            )
             return create_mailbox(
-                provider=merged_extra.get("mail_provider", "luckmail"),
-                extra=merged_extra,
+                provider=req.extra.get("mail_provider", ""),
+                extra=req.extra,
                 proxy=proxy,
             )
 
@@ -450,12 +480,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                             _sleep_with_control(wait_seconds)
                         next_start_time = time.time() + req.register_delay_seconds
                 control.checkpoint()
-                from core.config_store import config_store
-
-                merged_extra = config_store.get_all().copy()
-                merged_extra.update(
-                    {k: v for k, v in req.extra.items() if v is not None and v != ""}
-                )
+                merged_extra = req.extra.copy()
 
                 _config = RegisterConfig(
                     executor_type=req.executor_type,
@@ -486,6 +511,9 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 )
                 current_email = account.email or current_email
                 if isinstance(account.extra, dict):
+                    mailbox_service_id = merged_extra.get("mailbox_service_id")
+                    if mailbox_service_id not in (None, ""):
+                        account.extra.setdefault("mailbox_service_id", mailbox_service_id)
                     mail_provider = merged_extra.get("mail_provider", "")
                     if mail_provider:
                         account.extra.setdefault("mail_provider", mail_provider)

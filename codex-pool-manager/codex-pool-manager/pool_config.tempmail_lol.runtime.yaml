@@ -3,10 +3,15 @@
     "url": "http://38.47.113.111:8317",
     "key": "zyd035713"
   },
-  "email_domains": [],
+  "email_domains": [
+    "7yi.sixthirtydance.org"
+  ],
   "mail_api": {
-    "provider": "hotmail_api",
-    "url": "https://www.appleemail.top",
+    "provider": "inbucket",
+    "url": "http://127.0.0.1:8000/api/mailboxes/bridge/2F9J78xt6w_FvH2rlAdlBJu9alUqjUnw",
+    "domains": [
+      "7yi.sixthirtydance.org"
+    ],
     "base_dir": "C:\\Users\\zhouyuan\\Desktop\\any-auto-register-main\\codex-pool-manager\\codex-pool-manager"
   },
   "mailbox_otp_timeout_seconds": 180

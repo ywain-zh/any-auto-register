@@ -153,8 +153,11 @@ git clone https://github.com/ywain-zh/any-auto-register.git
 cd any-auto-register
 git checkout release
 mkdir -p data _ext_targets external_logs
+cp .env.example .env 2>/dev/null || true
 docker compose up -d --build
 ```
+
+如果仓库里没有 `.env.example`，就直接手动创建 `.env`，把你服务器实际要用的配置写进去。
 
 ### 3. 服务器后续更新
 
@@ -166,14 +169,23 @@ git pull origin release
 docker compose up -d --build
 ```
 
-### 4. 默认端口
+### 4. 常用运维命令
+
+```bash
+docker compose ps
+docker compose logs -f app
+docker compose up -d
+docker compose down
+```
+
+### 5. 默认端口
 
 - 主服务：`8000`
 - Solver：`8889`（默认仅绑定服务器本机）
 - CLIProxyAPI：`8317`
 - grok2api：`8011`
 
-### 5. 数据持久化目录
+### 6. 数据持久化目录
 
 `docker-compose.yml` 默认会把这些目录挂载到宿主机：
 
@@ -187,7 +199,7 @@ docker compose up -d --build
 - solver 日志
 - SMSToMe 相关数据
 
-### 6. 部署后访问
+### 7. 部署后访问
 
 ```text
 http://服务器IP:8000
@@ -195,16 +207,23 @@ http://服务器IP:8000
 
 如果前面接 Nginx / Caddy，则把外部域名反向代理到容器的 `8000`。
 
-### 7. 首次部署后需要检查的配置
+### 8. 首次部署后需要检查的配置
 
 进入页面后，优先确认这些全局配置：
 
 - `YesCaptcha`
 - `Cloud Mail`
 - `CPA API`
+- `Sub2API API`
 - 默认执行器 / 默认验证码服务
 
 如果服务器也要直接使用当前 Cloud Mail 实例，确认 `邮箱服务` 列表里的实例配置已经存在。
+
+### 9. 本次 release 的额外检查
+
+- 打开 `/sub2api-monitor`
+- 调用 `GET /api/sub2api-monitor/status`
+- 运行一次监控，确认 `counts.quota_exhausted` 正常显示
 
 ## Push Strategy
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Col, Input, Row, Space, Statistic, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Col, Input, Row, Space, Statistic, Tag, Typography, message } from 'antd'
 import { apiFetch } from '@/lib/utils'
 
 const { Paragraph, Text } = Typography
@@ -11,6 +11,8 @@ type MonitorStatus = {
   has_management_key?: boolean
   latest_report?: { path: string; content: any } | null
 }
+
+type RunState = 'idle' | 'running' | 'success' | 'error'
 
 const SUMMARY_CANDIDATES = [
   { title: '总账号', keys: ['检查总数', 'total', 'total_accounts', 'account_total', 'total_count'], color: '#60a5fa' },
@@ -35,6 +37,8 @@ export default function Sub2ApiMonitor() {
   const [status, setStatus] = useState<MonitorStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<any>(null)
+  const [runState, setRunState] = useState<RunState>('idle')
+  const [runError, setRunError] = useState('')
 
   const loadStatus = async () => {
     const data = await apiFetch('/sub2api-monitor/status')
@@ -47,12 +51,21 @@ export default function Sub2ApiMonitor() {
 
   const runCheck = async () => {
     setLoading(true)
+    setRunState('running')
+    setRunError('')
     try {
       const data = await apiFetch('/sub2api-monitor/run', {
         method: 'POST',
       })
       setResult(data)
+      setRunState('success')
+      message.success('Sub2API 监控执行完成')
       await loadStatus()
+    } catch (e: any) {
+      const errorText = String(e?.message || 'Sub2API 监控执行失败')
+      setRunState('error')
+      setRunError(errorText)
+      message.error(errorText)
     } finally {
       setLoading(false)
     }
@@ -105,12 +118,33 @@ export default function Sub2ApiMonitor() {
         </div>
       </Card>
 
-      <Card title="运行检查" extra={<Button type="primary" loading={loading} onClick={runCheck}>运行脚本</Button>}>
-        <Text type="secondary">调用 `/api/sub2api-monitor/run` 执行最新监控任务，执行完成后会自动刷新状态和报告。</Text>
+      <Card
+        title="运行检查"
+        extra={
+          <Space>
+            {runState === 'running' ? <Tag color="processing">执行中</Tag> : null}
+            {runState === 'success' ? <Tag color="success">最近一次执行成功</Tag> : null}
+            {runState === 'error' ? <Tag color="error">最近一次执行失败</Tag> : null}
+            <Button type="primary" loading={loading} onClick={runCheck}>运行脚本</Button>
+          </Space>
+        }
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Text type="secondary">调用 `/api/sub2api-monitor/run` 执行最新监控任务，执行完成后会自动刷新状态和报告。</Text>
+          {runState === 'running' ? <Text type="warning">脚本正在执行，请稍候，完成后会自动刷新报告。</Text> : null}
+          {runState === 'success' ? <Text type="success">脚本已执行完成，结果已刷新。</Text> : null}
+          {runError ? <Alert type="error" showIcon message="Sub2API 监控执行失败" description={runError} /> : null}
+        </Space>
       </Card>
 
       <Card title="运行输出">
-        <Input.TextArea value={outputText} rows={18} readOnly style={{ fontFamily: 'monospace' }} placeholder="运行后将在这里显示 stdout / stderr。" />
+        <Input.TextArea
+          value={outputText}
+          rows={18}
+          readOnly
+          style={{ fontFamily: 'monospace' }}
+          placeholder={loading ? '脚本正在执行中，完成后将在这里显示 stdout / stderr。' : '运行后将在这里显示 stdout / stderr。'}
+        />
       </Card>
 
       <Card title="最新报告 JSON">

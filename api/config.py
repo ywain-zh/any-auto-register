@@ -66,6 +66,7 @@ CONFIG_KEYS = [
     "cpa_cleanup_register_delay_seconds",
     "sub2api_api_url",
     "sub2api_api_key",
+    "codex_bind_target",
     "team_manager_url",
     "team_manager_key",
     "codex_proxy_url",

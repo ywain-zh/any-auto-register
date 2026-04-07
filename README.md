@@ -218,14 +218,23 @@ http://localhost:8000
 
 ## Windows 启动脚本说明
 
-仓库内已提供以下脚本：
+仓库内推荐只保留这两个中文双击脚本：
 
-- `start_backend.bat`
-- `start_backend.ps1`
-- `stop_backend.bat`
-- `stop_backend.ps1`
+- `一键启动.bat`
+- `一键停止.bat`
 
-这些脚本会强制使用 `any-auto-register` 环境启动/停止后端，可避免以下常见问题：
+其中 `一键启动.bat` 适合直接双击一键启动：
+
+- 固定使用后端端口 `8000`
+- 固定使用 Solver 端口 `8889`
+- 启动前自动清理占用这些端口的旧进程
+- 优先使用 `any-auto-register` conda 环境
+- 如果当前终端找不到 conda，会自动回退到当前 `python`
+- 启动后自动打开 `http://localhost:8000`
+
+`一键停止.bat` 会直接停止占用 `8000` / `8889` 的后端与 Solver 进程。
+
+这些脚本可避免以下常见问题：
 
 - 后端能启动，但 Solver 没有拉起
 - `ModuleNotFoundError: quart`
@@ -319,6 +328,26 @@ services/turnstile_solver/solver.log
 - SQLite 数据库持久化目录 `./data`
 - 随后端自动拉起的本地 Turnstile Solver
 
+### 首次部署
+
+```bash
+git clone https://github.com/ywain-zh/any-auto-register.git
+cd any-auto-register
+git checkout release
+mkdir -p data _ext_targets external_logs
+docker compose up -d --build
+```
+
+### 后续更新
+
+```bash
+cd any-auto-register
+git fetch origin
+git checkout release
+git pull origin release
+docker compose up -d --build
+```
+
 ### 启动
 
 ```bash
@@ -372,7 +401,7 @@ DATABASE_URL=sqlite:////app/data/account_manager.db
 | `SOLVER_PORT` | `8889` | Solver 监听端口 |
 | `LOCAL_SOLVER_URL` | `http://127.0.0.1:8889` | 后端访问 Solver 的地址 |
 
-如需传入 `SMSTOME_COOKIE`、`OPENAI_*` 等配置，可直接写入仓库根目录 `.env` 文件，`docker compose` 会自动注入到容器环境中。
+如需传入 `SMSTOME_COOKIE`、`OPENAI_*`、`SUB2API_*`、邮件服务配置等内容，可直接写入仓库根目录 `.env` 文件，`docker compose` 会自动注入到容器环境中。
 
 ### Camoufox 构建参数
 
@@ -387,7 +416,13 @@ CAMOUFOX_VERSION=135.0.1 CAMOUFOX_RELEASE=beta.24 docker compose build app
 - 当前 Docker 镜像主要覆盖主应用和本地 Turnstile Solver
 - `grok2api`、`CLIProxyAPI`、`Kiro Account Manager` 的自动安装/拉起逻辑仍偏向宿主机环境
 - 若依赖 `conda`、Go 或 Windows 可执行文件，不建议直接在当前 Linux 容器中启动这些插件
-- 如果你只需要 Web UI、账号管理、任务调度和本地 Solver，当前 Compose 配置可直接使用
+- 如果你只需要 Web UI、账号管理、任务调度、本地 Solver、Sub2API 监控，当前 Compose 配置可直接使用
+
+### 本次 release 部署后优先检查
+
+- `/sub2api-monitor`
+- `GET /api/sub2api-monitor/status`
+- 运行一次监控并确认 `counts.quota_exhausted` 正常显示
 
 ## 插件与外部依赖
 

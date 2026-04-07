@@ -28,12 +28,12 @@
 - 打开 `/sub2api-monitor`，确认页面可正常加载并显示最新报告
 - 运行一次 Sub2API 检查，确认报告里的 `counts.quota_exhausted` 正常返回
 - 执行 `GET /api/sub2api-monitor/status`，确认 API 正常返回配置与最新报告
-- 在服务器环境确认 `conda` 可用后再执行 `./start_backend.ps1`，或按部署文档直接用目标 Python 启动 `main.py`
+- Docker 部署时确认容器内 `APP_CONDA_ENV=docker` 生效，避免误判本地 conda 环境
 
 ### 备注
 
 - `reports/` 属于运行产物，不建议直接纳入发布审核结论；服务器按需保留历史报告
-- 如果服务器没有初始化 `conda` shell，请优先使用已准备好的 Python 环境直接启动后端
+- Docker 部署不依赖 `start_backend.ps1`，容器内直接通过 `docker/entrypoint.sh` 启动应用
 
 ---
 

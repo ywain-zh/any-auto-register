@@ -17,11 +17,19 @@ OAUTH_SCRIPT = SCRIPT_DIR / "codex_oauth_login.py"
 REGISTER_SCRIPT = SCRIPT_DIR / "http_register.py"
 
 
+import sys
+
 def _python_subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
+    root_path = str(ROOT_DIR)
+    existing = str(env.get("PYTHONPATH") or "").strip()
+    env["PYTHONPATH"] = root_path if not existing else os.pathsep.join([root_path, existing])
     return env
+
+
+PYTHON_EXECUTABLE = sys.executable
 
 
 def _format_structured_log(prefix: str, line: str) -> str:
@@ -96,16 +104,40 @@ def _stream_process_output(
     return "\n".join(output_lines)
 
 
+def _build_openai_oauth_url() -> str:
+    state = os.urandom(12).hex()
+    verifier = os.urandom(48).hex()
+    challenge = __import__("base64").urlsafe_b64encode(
+        __import__("hashlib").sha256(verifier.encode("ascii")).digest()
+    ).decode("ascii").rstrip("=")
+    params = {
+        "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+        "response_type": "code",
+        "redirect_uri": "http://localhost:1455/auth/callback",
+        "scope": "openid email profile offline_access",
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "prompt": "login",
+        "id_token_add_organizations": "true",
+        "codex_cli_simplified_flow": "true",
+    }
+    from urllib.parse import urlencode
+
+    return f"https://auth.openai.com/oauth/authorize?{urlencode(params)}"
+
+
+
 def _prewarm_openai_proxy(proxy: str | None) -> None:
     if not proxy:
         return
     proxies = {"http": proxy, "https": proxy}
     last_exc = None
+    oauth_url = _build_openai_oauth_url()
     for _ in range(2):
         try:
             s = cffi_requests.Session(proxies=proxies, impersonate="chrome")
-            s.get("https://chatgpt.com", timeout=30)
-            s.get("https://chatgpt.com/api/auth/csrf", timeout=20)
+            s.get(oauth_url, timeout=30, allow_redirects=True)
             return
         except Exception as exc:
             last_exc = exc
@@ -114,20 +146,86 @@ def _prewarm_openai_proxy(proxy: str | None) -> None:
 
 
 def probe_openai_proxy(proxy: str | None) -> dict:
+    steps: list[str] = []
     if not proxy:
-        return {"ok": True, "steps": ["no-proxy"]}
-    proxies = {"http": proxy, "https": proxy}
-    steps = []
+        return {"ok": True, "steps": ["skip:no_proxy"]}
     try:
-        s = cffi_requests.Session(proxies=proxies, impersonate="chrome")
-        r1 = s.get("https://chatgpt.com", timeout=30)
-        steps.append(f"chatgpt={r1.status_code}")
-        r2 = s.get("https://chatgpt.com/api/auth/csrf", timeout=20)
-        steps.append(f"csrf={r2.status_code}")
+        steps.append("prewarm:chatgpt.com")
+        _prewarm_openai_proxy(proxy)
+        steps.append("ok")
         return {"ok": True, "steps": steps}
     except Exception as exc:
-        steps.append(f"error={exc}")
-        return {"ok": False, "steps": steps}
+        steps.append(f"error:{exc}")
+        return {"ok": False, "steps": steps, "error": str(exc)}
+
+
+def resolve_codex_bind_target(config: dict | None) -> str:
+    value = str((config or {}).get("codex_bind_target") or "cpa").strip().lower()
+    if value not in {"cpa", "sub2api"}:
+        return "cpa"
+    return value
+
+
+def run_codex_oauth_bind(
+    *,
+    bind_target: str,
+    email: str,
+    password: str,
+    proxy: str | None,
+    headless: bool,
+    mail_api_config: dict,
+    cpa_url: str = "",
+    cpa_key: str = "",
+    sub2api_url: str = "",
+    sub2api_key: str = "",
+    hotmail_account_record: dict | None = None,
+    log_fn: Callable[[str], None] | None = None,
+) -> dict:
+    target = resolve_codex_bind_target({"codex_bind_target": bind_target})
+    if target == "sub2api":
+        runtime_mail_api = dict(mail_api_config or {})
+        runtime_mail_api.setdefault("base_dir", str(SCRIPT_DIR))
+        if hotmail_account_record and runtime_mail_api.get("provider") == "hotmail_api":
+            runtime_mail_api.setdefault("accounts_file", str(SCRIPT_DIR / "hotmail_accounts_runtime.txt"))
+            Path(str(runtime_mail_api["accounts_file"])).write_text(
+                "----".join(
+                    [
+                        str(hotmail_account_record.get("email") or ""),
+                        str(hotmail_account_record.get("mailbox_password") or ""),
+                        str(hotmail_account_record.get("client_id") or ""),
+                        str(hotmail_account_record.get("refresh_token") or ""),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        if not str(sub2api_url or "").strip() or not str(sub2api_key or "").strip():
+            raise RuntimeError("未配置 Sub2API 地址或 API Key")
+        from services.sub2api_oauth_bind import run_sub2api_codex_oauth_bind
+
+        return run_sub2api_codex_oauth_bind(
+            email=email,
+            password=password,
+            sub2api_url=str(sub2api_url).strip(),
+            sub2api_key=str(sub2api_key).strip(),
+            proxy=proxy,
+            headless=headless,
+            mail_api_config=runtime_mail_api,
+            log_fn=log_fn,
+        )
+    if not str(cpa_url or "").strip() or not str(cpa_key or "").strip():
+        raise RuntimeError("未配置 CLIProxyAPI / CPA 地址或管理口令")
+    return run_original_codex_oauth_bind(
+        email=email,
+        password=password,
+        cpa_url=str(cpa_url).strip(),
+        cpa_key=str(cpa_key).strip(),
+        proxy=proxy,
+        headless=headless,
+        mail_api_config=mail_api_config,
+        hotmail_account_record=hotmail_account_record,
+        log_fn=log_fn,
+    )
 
 
 def run_original_codex_oauth_bind(
@@ -174,7 +272,7 @@ def run_original_codex_oauth_bind(
         )
 
         command = [
-            "python",
+            PYTHON_EXECUTABLE,
             str(OAUTH_SCRIPT.name),
             "--accounts",
             str(accounts_file),
@@ -187,9 +285,7 @@ def run_original_codex_oauth_bind(
         ]
         if proxy:
             command.extend(["--proxy", proxy])
-        if headless:
-            pass
-        else:
+        if not headless:
             command.append("--no-headless")
 
         proc = subprocess.Popen(
@@ -240,7 +336,7 @@ def run_original_codex_register(
     with tempfile.TemporaryDirectory(prefix="codex_reg_") as temp_dir:
         temp_path = Path(temp_dir)
         command = [
-            "python",
+            PYTHON_EXECUTABLE,
             str(REGISTER_SCRIPT.name),
             "-c",
             str(config_path),

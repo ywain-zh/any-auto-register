@@ -32,7 +32,6 @@ import {
 import { ChatGPTRegistrationModeSwitch } from '@/components/ChatGPTRegistrationModeSwitch'
 import { TaskLogPanel } from '@/components/TaskLogPanel'
 import { usePersistentChatGPTRegistrationMode } from '@/hooks/usePersistentChatGPTRegistrationMode'
-import { parseBooleanConfigValue } from '@/lib/configValueParsers'
 import { buildChatGPTRegistrationRequestAdapter } from '@/lib/chatgptRegistrationRequestAdapter'
 import { apiFetch } from '@/lib/utils'
 import { normalizeExecutorForPlatform } from '@/lib/platformExecutorOptions'
@@ -53,10 +52,6 @@ interface MailboxServiceItem {
   provider: string
   is_active: boolean
 }
-
-const BUILTIN_MAILBOX_SERVICES: MailboxServiceItem[] = [
-  { id: 'builtin:tempmail_lol', name: 'TempMail.lol（自动生成）', provider: 'tempmail_lol', is_active: true },
-]
 
 function parseExtraJson(raw: string | undefined) {
   if (!raw) return {}
@@ -561,12 +556,9 @@ export default function Accounts() {
   useEffect(() => {
     apiFetch('/mailboxes')
       .then((items) => {
-        setMailboxServices([
-          ...BUILTIN_MAILBOX_SERVICES,
-          ...((items as MailboxServiceItem[]).filter((item) => item.is_active)),
-        ])
+        setMailboxServices((items as MailboxServiceItem[]).filter((item) => item.is_active))
       })
-      .catch(() => setMailboxServices(BUILTIN_MAILBOX_SERVICES))
+      .catch(() => setMailboxServices([]))
   }, [])
 
   const copyText = (text: string) => {
@@ -652,48 +644,7 @@ export default function Accounts() {
       const executorType = normalizeExecutorForPlatform(currentPlatform, cfg.default_executor)
       const registerExtra = {
         mailbox_service_id: values.mailbox_service_id,
-        mail_provider: cfg.mail_provider || 'luckmail',
-        laoudo_auth: cfg.laoudo_auth,
-        laoudo_email: cfg.laoudo_email,
-        laoudo_account_id: cfg.laoudo_account_id,
-        gptmail_base_url: cfg.gptmail_base_url,
-        gptmail_api_key: cfg.gptmail_api_key,
-        gptmail_domain: cfg.gptmail_domain,
-        maliapi_base_url: cfg.maliapi_base_url,
-        maliapi_api_key: cfg.maliapi_api_key,
-        maliapi_domain: cfg.maliapi_domain,
-        maliapi_auto_domain_strategy: cfg.maliapi_auto_domain_strategy,
         yescaptcha_key: cfg.yescaptcha_key,
-        moemail_api_url: cfg.moemail_api_url,
-        skymail_api_base: cfg.skymail_api_base,
-        skymail_token: cfg.skymail_token,
-        skymail_domain: cfg.skymail_domain,
-        duckmail_address: cfg.duckmail_address,
-        duckmail_password: cfg.duckmail_password,
-        duckmail_api_url: cfg.duckmail_api_url,
-        duckmail_provider_url: cfg.duckmail_provider_url,
-        duckmail_bearer: cfg.duckmail_bearer,
-        freemail_api_url: cfg.freemail_api_url,
-        freemail_admin_token: cfg.freemail_admin_token,
-        freemail_username: cfg.freemail_username,
-        freemail_password: cfg.freemail_password,
-        cfworker_api_url: cfg.cfworker_api_url,
-        cfworker_admin_token: cfg.cfworker_admin_token,
-        cfworker_custom_auth: cfg.cfworker_custom_auth,
-        cfworker_domain: cfg.cfworker_domain,
-        cfworker_subdomain: cfg.cfworker_subdomain,
-        cfworker_random_subdomain: parseBooleanConfigValue(cfg.cfworker_random_subdomain),
-        cfworker_fingerprint: cfg.cfworker_fingerprint,
-        smstome_cookie: cfg.smstome_cookie,
-        smstome_country_slugs: cfg.smstome_country_slugs,
-        smstome_phone_attempts: cfg.smstome_phone_attempts,
-        smstome_otp_timeout_seconds: cfg.smstome_otp_timeout_seconds,
-        smstome_poll_interval_seconds: cfg.smstome_poll_interval_seconds,
-        smstome_sync_max_pages_per_country: cfg.smstome_sync_max_pages_per_country,
-        luckmail_base_url: cfg.luckmail_base_url,
-        luckmail_api_key: cfg.luckmail_api_key,
-        luckmail_email_type: cfg.luckmail_email_type,
-        luckmail_domain: cfg.luckmail_domain,
       }
       const chatgptRegistrationRequestAdapter =
         buildChatGPTRegistrationRequestAdapter(

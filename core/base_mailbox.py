@@ -940,18 +940,21 @@ class HotmailMailbox(BaseMailbox):
         )
 
     def get_current_ids(self, account: MailboxAccount) -> set:
-        from services.hotmail_accounts import fetch_hotmail_latest_mail
+        from services.hotmail_accounts import list_hotmail_mails
 
         try:
-            result = fetch_hotmail_latest_mail(
+            result = list_hotmail_mails(
                 api_url=self.api_url,
                 email=account.email,
                 client_id=str((account.extra or {}).get("client_id") or ""),
                 refresh_token=str((account.extra or {}).get("refresh_token") or ""),
             )
-            mail = result.get("mail") or {}
-            mail_id = str(mail.get("date") or "") + "|" + str(mail.get("subject") or "")
-            return {mail_id} if mail_id.strip("|") else set()
+            items = result.get("items") or []
+            return {
+                str(item.get("message_id") or "").strip()
+                for item in items
+                if str(item.get("message_id") or "").strip()
+            }
         except Exception:
             return set()
 
@@ -964,7 +967,7 @@ class HotmailMailbox(BaseMailbox):
         code_pattern: str = None,
         **kwargs,
     ) -> str:
-        from services.hotmail_accounts import fetch_hotmail_latest_mail
+        from services.hotmail_accounts import list_hotmail_mails
 
         seen = set(before_ids or [])
         exclude_codes = {
@@ -973,43 +976,53 @@ class HotmailMailbox(BaseMailbox):
         otp_sent_at = kwargs.get("otp_sent_at")
 
         def poll_once() -> Optional[str]:
-            result = fetch_hotmail_latest_mail(
+            result = list_hotmail_mails(
                 api_url=self.api_url,
                 email=account.email,
                 client_id=str((account.extra or {}).get("client_id") or ""),
                 refresh_token=str((account.extra or {}).get("refresh_token") or ""),
             )
-            mail = result.get("mail") or {}
-            mail_id = str(mail.get("date") or "") + "|" + str(mail.get("subject") or "")
-            if mail_id in seen:
-                return None
-            mail_ts = 0
-            try:
-                from datetime import datetime
-
-                raw = str(mail.get("date") or "").strip()
-                if raw:
-                    mail_ts = datetime.fromisoformat(
-                        raw.replace("Z", "+00:00")
-                    ).timestamp()
-            except Exception:
+            for item in result.get("items") or []:
+                mail_id = str(item.get("message_id") or "").strip()
+                if not mail_id or mail_id in seen:
+                    continue
                 mail_ts = 0
-            if otp_sent_at and mail_ts and mail_ts < float(otp_sent_at) - 2:
-                return None
-            seen.add(mail_id)
-            content = " ".join(
-                [
-                    str(mail.get("subject") or ""),
-                    str(mail.get("text") or ""),
-                    str(mail.get("html") or ""),
-                ]
-            )
-            if keyword and keyword.lower() not in content.lower():
-                return None
-            code = self._safe_extract(content, code_pattern)
-            if code and code in exclude_codes:
-                return None
-            return code
+                try:
+                    from datetime import datetime
+
+                    raw = str(item.get("received_at") or "").strip()
+                    if raw:
+                        mail_ts = datetime.fromisoformat(
+                            raw.replace("Z", "+00:00")
+                        ).timestamp()
+                except Exception:
+                    mail_ts = 0
+                if otp_sent_at and mail_ts and mail_ts < float(otp_sent_at) - 2:
+                    seen.add(mail_id)
+                    continue
+                seen.add(mail_id)
+                content = " ".join(
+                    [
+                        str(item.get("subject") or ""),
+                        str(item.get("snippet") or ""),
+                        str(item.get("body_text") or ""),
+                        str(item.get("body_html") or ""),
+                    ]
+                )
+                if keyword and keyword.lower() not in content.lower():
+                    continue
+                code = self._safe_extract(content, code_pattern)
+                if code and code in exclude_codes:
+                    continue
+                if code:
+                    refresh_token = str(result.get("new_refresh_token") or "").strip()
+                    if refresh_token and account.extra is not None:
+                        account.extra["refresh_token"] = refresh_token
+                    return code
+            refresh_token = str(result.get("new_refresh_token") or "").strip()
+            if refresh_token and account.extra is not None:
+                account.extra["refresh_token"] = refresh_token
+            return None
 
         return self._run_polling_wait(
             timeout=timeout,

@@ -16,7 +16,7 @@ from platforms.chatgpt.cpa_upload import generate_token_json
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_GROUP_IDS = [2]
+DEFAULT_GROUP_IDS = [3]
 DEFAULT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 

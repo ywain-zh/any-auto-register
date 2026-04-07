@@ -1,21 +1,16 @@
 import { useEffect, useState } from 'react'
-import { App, Card, Form, Input, Select, Button, message, Tabs, Space, Tag, Typography, Modal, QRCode, Switch, List, Popconfirm } from 'antd'
+import { App, Card, Form, Input, Select, Button, message, Tabs, Space, Tag, Typography, Modal, QRCode, Switch } from 'antd'
 import {
   SaveOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
-  MailOutlined,
   SafetyOutlined,
   ApiOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   SyncOutlined,
-  PlusOutlined,
   LockOutlined,
-  EditOutlined,
-  DeleteOutlined,
 } from '@ant-design/icons'
-import { parseBooleanConfigValue } from '@/lib/configValueParsers'
 import { apiFetch } from '@/lib/utils'
 
 const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
@@ -56,6 +51,10 @@ const SELECT_FIELDS: Record<string, { label: string; value: string }[]> = {
     { label: 'AT（Access Token，推荐）', value: 'at' },
     { label: 'RT（Refresh Token）', value: 'rt' },
   ],
+  codex_bind_target: [
+    { label: 'Sub2API', value: 'sub2api' },
+    { label: 'CPA / CLIProxyAPI', value: 'cpa' },
+  ],
 }
 
 const TAB_ITEMS = [
@@ -70,35 +69,6 @@ const TAB_ITEMS = [
         fields: [
           { key: 'default_executor', label: '执行器类型', type: 'select' },
           { key: 'default_proxy', label: '默认代理', placeholder: 'http://user:pass@host:port' },
-        ],
-      },
-    ],
-  },
-  {
-    key: 'mailbox',
-    label: '邮箱服务',
-    icon: <MailOutlined />,
-    sections: [
-      {
-        title: '默认邮箱服务',
-        desc: '选择注册时使用的邮箱类型',
-        fields: [{ key: 'mail_provider', label: '邮箱服务', type: 'select' }],
-      },
-      {
-        title: 'TempMail.lol',
-        desc: '自动生成邮箱，无需配置，需要代理访问（CN IP 被封）',
-        fields: [],
-      },
-      {
-        title: 'CF Worker 自建邮箱',
-        desc: '基于 Cloudflare Worker 的自建临时邮箱服务',
-        fields: [
-          { key: 'cfworker_api_url', label: 'API URL', placeholder: 'https://apimail.example.com' },
-          { key: 'cfworker_admin_token', label: '管理员 Token', secret: true },
-          { key: 'cfworker_custom_auth', label: '站点密码', secret: true },
-          { key: 'cfworker_subdomain', label: '固定子域名', placeholder: 'mail / pool-a' },
-          { key: 'cfworker_random_subdomain', label: '随机子域名', type: 'boolean' },
-          { key: 'cfworker_fingerprint', label: 'Fingerprint', placeholder: '6703363b...' },
         ],
       },
     ],
@@ -169,8 +139,10 @@ const TAB_ITEMS = [
       },
       {
         title: 'Codex',
-        desc: 'Codex 注册流程依赖 CLIProxyAPI 管理面板和邮箱服务配置。若使用 Hotmail，请先在邮箱服务实例中导入账号池。',
-        fields: [],
+        desc: 'Codex 注册流程依赖邮箱服务配置，并可选择 OAuth 绑定目标。若使用 Hotmail，请先在邮箱服务实例中导入账号池。',
+        fields: [
+          { key: 'codex_bind_target', label: 'OAuth 绑定目标', type: 'select' },
+        ],
       },
       {
         title: 'SMSToMe 手机验证',
@@ -276,90 +248,6 @@ interface TabConfig {
   sections: SectionConfig[]
 }
 
-interface MailboxServiceItem {
-  id: number | string
-  name: string
-  provider: string
-  config: Record<string, string>
-  is_active: boolean
-}
-
-const BUILTIN_MAILBOX_SERVICES: MailboxServiceItem[] = [
-  {
-    id: 'builtin:tempmail_lol',
-    name: 'TempMail.lol（自动生成）',
-    provider: 'tempmail_lol',
-    config: {},
-    is_active: true,
-  },
-]
-
-const MAILBOX_PROVIDER_OPTIONS = [
-  { label: 'Cloud Mail', value: 'cloudmail' },
-  { label: 'Hotmail', value: 'hotmail' },
-  { label: 'SkyMail', value: 'skymail' },
-  { label: 'DuckMail', value: 'duckmail' },
-  { label: 'GPTMail', value: 'gptmail' },
-  { label: 'YYDS Mail / MaliAPI', value: 'maliapi' },
-  { label: 'Freemail', value: 'freemail' },
-  { label: 'Laoudo', value: 'laoudo' },
-  { label: 'MoeMail', value: 'moemail' },
-  { label: 'LuckMail', value: 'luckmail' },
-]
-
-const MAILBOX_PROVIDER_FIELDS: Record<string, FieldConfig[]> = {
-  cloudmail: [
-    { key: 'cloudmail_api_url', label: 'API URL', placeholder: 'https://mail.example.com' },
-    { key: 'cloudmail_admin_email', label: '管理员邮箱', placeholder: 'admin@example.com' },
-    { key: 'cloudmail_admin_password', label: '管理员密码', secret: true },
-    { key: 'cloudmail_domains', label: '邮箱域名列表', placeholder: 'goodfine.ccwu.cc\nexample.com\n或用英文逗号分隔' },
-  ],
-  hotmail: [],
-  skymail: [
-    { key: 'skymail_api_base', label: 'Base URL', placeholder: 'https://mail.example.com' },
-    { key: 'skymail_token', label: 'Authorization Token', secret: true },
-    { key: 'skymail_domain', label: '邮箱域名', placeholder: 'mail.example.com' },
-  ],
-  duckmail: [
-    { key: 'duckmail_api_url', label: 'Web URL', placeholder: 'https://www.duckmail.sbs' },
-    { key: 'duckmail_provider_url', label: 'Provider URL', placeholder: 'https://api.duckmail.sbs' },
-    { key: 'duckmail_bearer', label: 'Bearer Token', secret: true },
-    { key: 'duckmail_domain', label: '自定义域名', placeholder: '留空则从 Provider URL 推导' },
-    { key: 'duckmail_api_key', label: 'API Key（私有域名）', secret: true },
-  ],
-  gptmail: [
-    { key: 'gptmail_base_url', label: 'API URL', placeholder: 'https://mail.chatgpt.org.uk' },
-    { key: 'gptmail_api_key', label: 'API Key', secret: true },
-    { key: 'gptmail_domain', label: '邮箱域名（可选）', placeholder: 'example.com' },
-  ],
-  maliapi: [
-    { key: 'maliapi_base_url', label: 'API URL', placeholder: 'https://maliapi.215.im/v1' },
-    { key: 'maliapi_api_key', label: 'API Key', secret: true },
-    { key: 'maliapi_domain', label: '邮箱域名（可选）', placeholder: 'example.com' },
-    { key: 'maliapi_auto_domain_strategy', label: '自动域名策略', type: 'select' },
-  ],
-  freemail: [
-    { key: 'freemail_api_url', label: 'API URL', placeholder: 'https://mail.example.com' },
-    { key: 'freemail_admin_token', label: '管理员令牌', secret: true },
-    { key: 'freemail_username', label: '用户名（可选）' },
-    { key: 'freemail_password', label: '密码（可选）', secret: true },
-  ],
-  laoudo: [
-    { key: 'laoudo_email', label: '邮箱地址', placeholder: 'xxx@laoudo.com' },
-    { key: 'laoudo_account_id', label: 'Account ID', placeholder: '563' },
-    { key: 'laoudo_auth', label: 'JWT Token', secret: true },
-  ],
-  moemail: [
-    { key: 'moemail_api_url', label: 'API URL', placeholder: 'https://sall.cc' },
-  ],
-  luckmail: [
-    { key: 'luckmail_base_url', label: '平台地址', placeholder: 'https://mails.luckyous.com' },
-    { key: 'luckmail_api_key', label: 'API Key', secret: true },
-    { key: 'luckmail_email_type', label: '邮箱类型（可选）', placeholder: 'ms_graph / ms_imap / self_built' },
-    { key: 'luckmail_domain', label: '邮箱域名（可选）', placeholder: 'outlook.com / gmail.com' },
-  ],
-}
-
 function formatResultText(data: unknown) {
   if (typeof data === 'string') return data
   try {
@@ -369,40 +257,6 @@ function formatResultText(data: unknown) {
   }
 }
 
-function normalizeDomainList(input: unknown): string[] {
-  const items = Array.isArray(input) ? input : []
-  const seen = new Set<string>()
-  const domains: string[] = []
-  for (const item of items) {
-    const domain = String(item || '').trim().toLowerCase().replace(/^@/, '')
-    if (!domain || seen.has(domain)) continue
-    seen.add(domain)
-    domains.push(domain)
-  }
-  return domains
-}
-
-function parseStoredDomainList(value: unknown): string[] {
-  if (Array.isArray(value)) return normalizeDomainList(value)
-  if (typeof value !== 'string') return []
-
-  const text = value.trim()
-  if (!text) return []
-
-  try {
-    const parsed = JSON.parse(text)
-    if (Array.isArray(parsed)) {
-      return normalizeDomainList(parsed)
-    }
-  } catch {}
-
-  return normalizeDomainList(
-    text
-      .split('\n')
-      .flatMap((line) => line.split(','))
-      .map((item) => item.trim()),
-  )
-}
 
 function ConfigField({ field }: { field: FieldConfig }) {
   const [showSecret, setShowSecret] = useState(false)
@@ -447,346 +301,6 @@ function ConfigSection({ section }: { section: SectionConfig }) {
         <ConfigField key={field.key} field={field} />
       ))}
     </Card>
-  )
-}
-
-function MailboxServiceModalFields({ provider }: { provider: string }) {
-  const fields = MAILBOX_PROVIDER_FIELDS[provider] || []
-  return (
-    <>
-      {fields.map((field) => (
-        <ConfigField key={field.key} field={field} />
-      ))}
-    </>
-  )
-}
-
-function MailboxServicesPanel() {
-  const [items, setItems] = useState<MailboxServiceItem[]>([])
-  const [loading, setLoading] = useState(false)
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editingItem, setEditingItem] = useState<MailboxServiceItem | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [hotmailModalOpen, setHotmailModalOpen] = useState(false)
-  const [hotmailAccounts, setHotmailAccounts] = useState<any[]>([])
-  const [hotmailTotal, setHotmailTotal] = useState(0)
-  const [hotmailPage, setHotmailPage] = useState(1)
-  const [hotmailPageSize] = useState(10)
-  const [hotmailCurrentService, setHotmailCurrentService] = useState<MailboxServiceItem | null>(null)
-  const [hotmailMailModal, setHotmailMailModal] = useState<{ open: boolean; title: string; content: string }>({ open: false, title: '', content: '' })
-  const [hotmailBindingId, setHotmailBindingId] = useState<number | null>(null)
-  const [form] = Form.useForm()
-  const provider = Form.useWatch('provider', form)
-
-  const load = async () => {
-    setLoading(true)
-    try {
-      const result = await apiFetch('/mailboxes') as MailboxServiceItem[]
-      setItems([...BUILTIN_MAILBOX_SERVICES, ...(result || [])])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
-
-  const openCreate = () => {
-    setEditingItem(null)
-    form.resetFields()
-    form.setFieldsValue({ provider: 'cloudmail' })
-    setModalOpen(true)
-  }
-
-  const openEdit = (item: MailboxServiceItem) => {
-    setEditingItem(item)
-    form.resetFields()
-    form.setFieldsValue({ name: item.name, provider: item.provider, ...(item.config || {}) })
-    setModalOpen(true)
-  }
-
-  const handleDelete = async (item: MailboxServiceItem) => {
-    await apiFetch(`/mailboxes/${item.id}`, { method: 'DELETE' })
-    message.success('邮箱服务已删除')
-    load()
-  }
-
-  const handleToggle = async (item: MailboxServiceItem) => {
-    await apiFetch(`/mailboxes/${item.id}/toggle`, { method: 'PATCH' })
-    message.success(item.is_active ? '已停用邮箱服务' : '已启用邮箱服务')
-    load()
-  }
-
-  const handleSave = async () => {
-    const values = await form.validateFields()
-    const nextProvider = values.provider
-    const fields = MAILBOX_PROVIDER_FIELDS[nextProvider] || []
-    const config = Object.fromEntries(fields.map((field) => [field.key, values[field.key] || '']))
-
-    setSaving(true)
-    try {
-      if (editingItem) {
-        await apiFetch(`/mailboxes/${editingItem.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            name: values.name,
-            provider: nextProvider,
-            config,
-            is_active: editingItem.is_active,
-          }),
-        })
-        message.success('邮箱服务已更新')
-      } else {
-        await apiFetch('/mailboxes', {
-          method: 'POST',
-          body: JSON.stringify({
-            name: values.name,
-            provider: nextProvider,
-            config,
-          }),
-        })
-        message.success('邮箱服务已新增')
-      }
-      setModalOpen(false)
-      form.resetFields()
-      load()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleImportHotmail = async (item: MailboxServiceItem, file: File) => {
-    setImporting(true)
-    try {
-      const text = await file.text()
-      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-      const result = await apiFetch(`/mailboxes/${item.id}/hotmail/import`, {
-        method: 'POST',
-        body: JSON.stringify({ lines }),
-      })
-      message.success(`导入完成：新增 ${result.created}，更新 ${result.updated}`)
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  const loadHotmailAccounts = async (item: MailboxServiceItem, page = 1) => {
-    const result = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts?page=${page}&page_size=${hotmailPageSize}`)
-    setHotmailAccounts(result?.items || [])
-    setHotmailTotal(result?.total || 0)
-    setHotmailPage(result?.page || page)
-  }
-
-  const openHotmailAccounts = async (item: MailboxServiceItem) => {
-    setHotmailCurrentService(item)
-    await loadHotmailAccounts(item, 1)
-    setHotmailModalOpen(true)
-  }
-
-  const openLatestMail = async (item: MailboxServiceItem, accountId: number, email: string) => {
-    const result = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts/${accountId}/latest-mail`)
-    setHotmailMailModal({
-      open: true,
-      title: `${email} 最新邮件`,
-      content: formatResultText(result),
-    })
-  }
-
-  const bindHotmailAccount = async (item: MailboxServiceItem, account: any) => {
-    setHotmailBindingId(account.id)
-    try {
-      const result = await apiFetch(`/mailboxes/${item.id}/hotmail/accounts/${account.id}/bind`, {
-        method: 'POST',
-        body: JSON.stringify({ proxy: 'http://127.0.0.1:4874', headless: false }),
-      })
-      message.success('登录绑定完成，已尝试上传到 CPA')
-      await loadHotmailAccounts(item, hotmailPage)
-      setHotmailMailModal({
-        open: true,
-        title: `${account.email} 绑定日志`,
-        content: formatResultText(result),
-      })
-    } finally {
-      setHotmailBindingId(null)
-    }
-  }
-
-  return (
-    <>
-      <Card
-        title="邮箱服务列表"
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增邮箱服务</Button>}
-      >
-        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          这里维护可选的邮箱服务实例。TempMail.lol 为系统内置项，固定可用且不可编辑。
-        </Typography.Paragraph>
-        <List
-          loading={loading}
-          dataSource={items}
-          renderItem={(item) => {
-            const builtin = String(item.id).startsWith('builtin:')
-            return (
-              <List.Item
-                actions={builtin ? [] : [
-                  item.provider === 'hotmail' ? (
-                    <Button
-                      key="import"
-                      type="text"
-                      loading={importing}
-                      onClick={() => {
-                        const input = document.createElement('input')
-                        input.type = 'file'
-                        input.accept = '.txt,text/plain'
-                        input.onchange = async () => {
-                          const file = input.files?.[0]
-                          if (file) await handleImportHotmail(item, file)
-                        }
-                        input.click()
-                      }}
-                    >导入</Button>
-                  ) : null,
-                  item.provider === 'hotmail' ? (
-                    <Button key="view" type="text" onClick={() => openHotmailAccounts(item)}>查看</Button>
-                  ) : null,
-                  <Button key="edit" type="text" icon={<EditOutlined />} onClick={() => openEdit(item)} />,
-                  <Button key="toggle" type="text" onClick={() => handleToggle(item)}>{item.is_active ? '停用' : '启用'}</Button>,
-                  <Popconfirm key="delete" title="确认删除这个邮箱服务？" onConfirm={() => handleDelete(item)}>
-                    <Button type="text" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={
-                    <Space>
-                      <span>{item.name}</span>
-                      <Tag color={builtin ? 'blue' : item.is_active ? 'green' : 'default'}>
-                        {builtin ? '系统内置' : item.is_active ? '已启用' : '已停用'}
-                      </Tag>
-                      <Tag>{item.provider}</Tag>
-                    </Space>
-                  }
-                  description={
-                    <Typography.Text type="secondary">
-                      {(MAILBOX_PROVIDER_FIELDS[item.provider] || [])
-                        .map((field) => `${field.label}: ${item.config?.[field.key] ? '已配置' : '未配置'}`)
-                        .join(' · ') || '无需额外配置'}
-                    </Typography.Text>
-                  }
-                />
-              </List.Item>
-            )
-          }}
-        />
-      </Card>
-
-      <Modal
-        open={modalOpen}
-        title={editingItem ? '编辑邮箱服务' : '新增邮箱服务'}
-        onCancel={() => setModalOpen(false)}
-        onOk={handleSave}
-        okText={editingItem ? '保存修改' : '创建服务'}
-        confirmLoading={saving}
-        destroyOnHidden
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item name="name" label="显示名称" rules={[{ required: true, message: '请输入显示名称' }]}>
-            <Input placeholder="例如：Cloud Mail 主站" />
-          </Form.Item>
-          <Form.Item name="provider" label="邮箱服务类型" rules={[{ required: true, message: '请选择邮箱服务类型' }]}>
-            <Select options={MAILBOX_PROVIDER_OPTIONS} />
-          </Form.Item>
-          <MailboxServiceModalFields provider={provider} />
-        </Form>
-      </Modal>
-
-      <Modal
-        open={hotmailModalOpen}
-        title="Hotmail 账号列表"
-        onCancel={() => {
-          setHotmailModalOpen(false)
-          setHotmailCurrentService(null)
-          setHotmailPage(1)
-        }}
-        footer={null}
-        width={920}
-      >
-        <List
-          dataSource={hotmailAccounts}
-          pagination={{
-            current: hotmailPage,
-            pageSize: hotmailPageSize,
-            total: hotmailTotal,
-            showSizeChanger: false,
-            onChange: (page) => {
-              if (hotmailCurrentService) loadHotmailAccounts(hotmailCurrentService, page)
-            },
-          }}
-          renderItem={(account) => (
-            <List.Item
-              actions={[
-                <Button
-                  key="bind"
-                  type="link"
-                  loading={hotmailBindingId === account.id}
-                  disabled={!account.openai_password}
-                  onClick={() => {
-                    const service = items.find((entry) => entry.provider === 'hotmail' && entry.id === account.mailbox_service_id)
-                    if (service) bindHotmailAccount(service, account)
-                  }}
-                >登录绑定</Button>,
-                <Button key="mail" type="link" onClick={() => {
-                  const service = items.find((entry) => entry.provider === 'hotmail' && entry.id === account.mailbox_service_id)
-                  if (service) openLatestMail(service, account.id, account.email)
-                }}>查邮件</Button>,
-              ]}
-            >
-              <List.Item.Meta
-                title={
-                  <Space>
-                    <span>{account.email}</span>
-                    <Tag color={account.register_status === 'success' ? 'green' : account.register_status === 'failed' ? 'red' : account.register_status === 'pending_bind' ? 'gold' : 'default'}>
-                      {account.register_status === 'success' ? '注册成功' : account.register_status === 'failed' ? '注册失败' : account.register_status === 'pending_bind' ? '待绑定' : '未注册'}
-                    </Tag>
-                  </Space>
-                }
-                description={
-                  <Typography.Text type="secondary">
-                    {account.last_error ? `错误: ${account.last_error}` : account.openai_password ? `OpenAI 密码已保存` : '尚未生成 OpenAI 密码'}
-                  </Typography.Text>
-                }
-              />
-            </List.Item>
-          )}
-        />
-      </Modal>
-
-      <Modal
-        open={hotmailMailModal.open}
-        title={hotmailMailModal.title}
-        onCancel={() => setHotmailMailModal((prev) => ({ ...prev, open: false }))}
-        onOk={() => setHotmailMailModal((prev) => ({ ...prev, open: false }))}
-        width={760}
-      >
-        <pre
-          style={{
-            margin: 0,
-            maxHeight: 420,
-            overflow: 'auto',
-            padding: 12,
-            borderRadius: 8,
-            background: 'rgba(127,127,127,0.08)',
-            fontSize: 12,
-            lineHeight: 1.5,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {hotmailMailModal.content}
-        </pre>
-      </Modal>
-    </>
   )
 }
 
@@ -1281,9 +795,6 @@ export default function Settings() {
 
   useEffect(() => {
     apiFetch('/config').then((data) => {
-      if (!data.mail_provider) {
-        data.mail_provider = 'luckmail'
-      }
       if (!data.gptmail_base_url) {
         data.gptmail_base_url = 'https://mail.chatgpt.org.uk'
       }
@@ -1293,9 +804,6 @@ export default function Settings() {
       if (!data.luckmail_base_url) {
         data.luckmail_base_url = 'https://mails.luckyous.com/'
       }
-      data.cfworker_domains = parseStoredDomainList(data.cfworker_domains)
-      data.cfworker_enabled_domains = parseStoredDomainList(data.cfworker_enabled_domains)
-      data.cfworker_random_subdomain = parseBooleanConfigValue(data.cfworker_random_subdomain)
       form.setFieldsValue(data)
     })
   }, [form])
@@ -1304,29 +812,8 @@ export default function Settings() {
     setSaving(true)
     try {
       const values = form.getFieldsValue(true)
-      const domains = normalizeDomainList(values.cfworker_domains)
-      const enabledDomains = normalizeDomainList(values.cfworker_enabled_domains).filter((domain) => domains.includes(domain))
-
-      if (domains.length > 0 && enabledDomains.length === 0) {
-        setActiveTab('mailbox')
-        message.error('CF Worker 至少需要启用一个域名')
-        return
-      }
-
-      values.cfworker_domains = JSON.stringify(domains)
-      values.cfworker_enabled_domains = JSON.stringify(enabledDomains)
-      if (domains.length > 0) {
-        values.cfworker_domain = ''
-      }
-      values.cfworker_random_subdomain = parseBooleanConfigValue(values.cfworker_random_subdomain)
 
       await apiFetch('/config', { method: 'PUT', body: JSON.stringify({ data: values }) })
-      form.setFieldsValue({
-        cfworker_domains: domains,
-        cfworker_enabled_domains: enabledDomains,
-        cfworker_domain: domains.length > 0 ? '' : values.cfworker_domain,
-        cfworker_random_subdomain: values.cfworker_random_subdomain,
-      })
       message.success('保存成功')
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -1365,8 +852,6 @@ export default function Settings() {
         <div style={{ flex: 1 }}>
           {activeTab === 'integrations' ? (
             <IntegrationsPanel />
-          ) : activeTab === 'mailbox' ? (
-            <MailboxServicesPanel />
           ) : activeTab === 'security' ? (
             <SecurityPanel />
           ) : (

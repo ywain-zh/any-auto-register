@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Navigate, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { App as AntdApp, ConfigProvider, Layout, Menu, Button, Spin } from 'antd'
 import {
@@ -10,6 +10,7 @@ import {
   SunOutlined,
   MoonOutlined,
   LogoutOutlined,
+  MailOutlined,
 } from '@ant-design/icons'
 import zhCN from 'antd/locale/zh_CN'
 import Dashboard from '@/pages/Dashboard'
@@ -21,6 +22,8 @@ import TaskHistory from '@/pages/TaskHistory'
 import Login from '@/pages/Login'
 import CpaMonitor from '@/pages/CpaMonitor'
 import Sub2ApiMonitor from '@/pages/Sub2ApiMonitor'
+import Mailboxes from '@/pages/Mailboxes'
+import MailboxProviders from '@/pages/MailboxProviders'
 import { darkTheme, lightTheme } from './theme'
 import { apiFetch, clearToken, getToken } from '@/lib/utils'
 
@@ -93,6 +96,8 @@ function AppContent() {
     const path = location.pathname
     if (path === '/') return ['/']
     if (path.startsWith('/accounts')) return [path]
+    if (path.startsWith('/mailboxes/providers')) return ['/mailboxes/providers']
+    if (path.startsWith('/mailboxes')) return ['/mailboxes/inboxes']
     if (path === '/history') return ['/history']
     if (path === '/cpa-monitor') return ['/cpa-monitor']
     if (path === '/sub2api-monitor') return ['/sub2api-monitor']
@@ -115,6 +120,21 @@ function AppContent() {
         key: `/accounts/${p.key}`,
         label: p.label,
       })),
+    },
+    {
+      key: '/mailboxes',
+      icon: <MailOutlined />,
+      label: '邮箱服务',
+      children: [
+        {
+          key: '/mailboxes/inboxes',
+          label: '微软邮箱',
+        },
+        {
+          key: '/mailboxes/providers',
+          label: '邮箱服务管理',
+        },
+      ],
     },
     {
       key: '/history',
@@ -154,6 +174,10 @@ function AppContent() {
           style={{
             background: currentTheme.token?.colorBgContainer,
             borderRight: `1px solid ${currentTheme.token?.colorBorder}`,
+            position: 'sticky',
+            top: 0,
+            height: '100vh',
+            overflow: 'hidden',
           }}
           width={220}
         >
@@ -180,62 +204,71 @@ function AppContent() {
               </span>
             )}
           </div>
-          <Menu
-            mode="inline"
-            selectedKeys={getSelectedKey()}
-            defaultOpenKeys={['/accounts']}
-            items={menuItems}
-            onClick={({ key }) => navigate(key)}
-            style={{
-              borderRight: 0,
-              background: 'transparent',
-            }}
-          />
           <div
             style={{
-              position: 'absolute',
-              bottom: 56,
-              left: 0,
-              right: 0,
-              padding: '0 16px',
+              height: 'calc(100vh - 64px)',
               display: 'flex',
               flexDirection: 'column',
-              gap: 8,
             }}
           >
-            <Button
-              block
-              icon={isLight ? <SunOutlined /> : <MoonOutlined />}
-              onClick={() => setThemeMode(isLight ? 'dark' : 'light')}
+            <Menu
+              mode="inline"
+              selectedKeys={getSelectedKey()}
+              defaultOpenKeys={['/accounts']}
+              items={menuItems}
+              onClick={({ key }) => navigate(key)}
               style={{
+                borderRight: 0,
+                background: 'transparent',
+                flex: 1,
+                overflowY: 'auto',
+                minHeight: 0,
+              }}
+            />
+            <div
+              style={{
+                padding: '16px',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: collapsed ? 'center' : 'space-between',
+                flexDirection: 'column',
+                gap: 8,
+                borderTop: `1px solid ${currentTheme.token?.colorBorder}`,
               }}
             >
-              {!collapsed && (isLight ? '亮色模式' : '暗色模式')}
-            </Button>
-            {hasPassword && (
               <Button
                 block
-                danger
-                icon={<LogoutOutlined />}
-                onClick={() => { clearToken(); navigate('/login') }}
+                icon={isLight ? <SunOutlined /> : <MoonOutlined />}
+                onClick={() => setThemeMode(isLight ? 'dark' : 'light')}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: collapsed ? 'center' : 'space-between',
                 }}
               >
-                {!collapsed && '退出登录'}
+                {!collapsed && (isLight ? '亮色模式' : '暗色模式')}
               </Button>
-            )}
+              {hasPassword && (
+                <Button
+                  block
+                  danger
+                  icon={<LogoutOutlined />}
+                  onClick={() => { clearToken(); navigate('/login') }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: collapsed ? 'center' : 'space-between',
+                  }}
+                >
+                  {!collapsed && '退出登录'}
+                </Button>
+              )}
+            </div>
           </div>
         </Sider>
         <Content
           style={{
             padding: 24,
-            overflow: 'auto',
+            overflowY: 'auto',
+            height: '100vh',
             background: currentTheme.token?.colorBgLayout,
           }}
         >
@@ -243,6 +276,9 @@ function AppContent() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/accounts/:platform" element={<Accounts />} />
+            <Route path="/mailboxes" element={<Navigate to="/mailboxes/inboxes" replace />} />
+            <Route path="/mailboxes/inboxes" element={<Mailboxes />} />
+            <Route path="/mailboxes/providers" element={<MailboxProviders />} />
             <Route path="/register" element={<RegisterTaskPage />} />
             <Route path="/history" element={<TaskHistory />} />
             <Route path="/cpa-monitor" element={<CpaMonitor />} />
