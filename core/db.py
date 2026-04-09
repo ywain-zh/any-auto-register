@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import os
 from typing import Optional
 from sqlmodel import Field, SQLModel, create_engine, Session, select
+from sqlalchemy import text
 import json
 
 
@@ -84,6 +85,8 @@ class HotmailAccountModel(SQLModel, table=True):
     mailbox_password: str = ""
     client_id: str = ""
     refresh_token: str = ""
+    receive_mode: str = Field(default="graph", index=True)
+    mailbox_status: str = Field(default="unknown", index=True)
     register_status: str = Field(default="unregistered", index=True)
     claimed_at: Optional[datetime] = None
     last_error: str = ""
@@ -132,6 +135,33 @@ def save_account(account) -> "AccountModel":
 
 def init_db():
     SQLModel.metadata.create_all(engine)
+    with engine.begin() as conn:
+        existing_columns = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(hotmail_accounts)")).fetchall()
+        }
+        if "receive_mode" not in existing_columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE hotmail_accounts ADD COLUMN receive_mode TEXT DEFAULT 'graph'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE hotmail_accounts SET receive_mode = 'graph' WHERE receive_mode IS NULL OR receive_mode = ''"
+                )
+            )
+        if "mailbox_status" not in existing_columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE hotmail_accounts ADD COLUMN mailbox_status TEXT DEFAULT 'unknown'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE hotmail_accounts SET mailbox_status = 'unknown' WHERE mailbox_status IS NULL OR mailbox_status = ''"
+                )
+            )
 
 
 def get_session():

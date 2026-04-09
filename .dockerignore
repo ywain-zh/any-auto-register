@@ -21,4 +21,8 @@ services/turnstile_solver/solver.log
 smstome_used/
 smstome_all_numbers.txt
 smstome_uk_deep_numbers.txt
+reports/
+debug_*.png
+codex-pool-manager/codex-pool-manager/*.runtime.yaml
+codex-pool-manager/codex-pool-manager/hotmail_accounts_runtime.txt
 .env

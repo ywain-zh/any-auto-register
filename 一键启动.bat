@@ -4,16 +4,31 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 
-set "ENV_NAME=any-auto-register"
 set "BIND_HOST=0.0.0.0"
 set "PORT=8000"
 set "SOLVER_PORT=8889"
 set "AUTO_OPEN_BROWSER=1"
+set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
+
+if not exist "%PYTHON_EXE%" (
+  set "PYTHON_EXE=%~dp0.venv\bin\python"
+)
 
 echo [INFO] Project root: %CD%
 echo [INFO] Fixed backend port: %PORT%
 echo [INFO] Fixed solver port: %SOLVER_PORT%
 echo [INFO] Target URL: http://localhost:%PORT%
+echo.
+
+if not exist "%PYTHON_EXE%" (
+  echo [ERROR] Local virtualenv python not found.
+  echo [ERROR] Expected: %~dp0.venv\Scripts\python.exe
+  echo [ERROR] Please create the local .venv first.
+  pause
+  exit /b 1
+)
+
+echo [INFO] Using local virtualenv: %PYTHON_EXE%
 echo.
 
 echo [INFO] Clearing occupied ports before launch...
@@ -26,52 +41,16 @@ if errorlevel 1 (
 )
 echo.
 
-set "PYTHON_EXE="
-set "LAUNCH_MODE="
-
-where conda >nul 2>nul
-if not errorlevel 1 (
-  for /f "usebackq delims=" %%i in (`conda run --no-capture-output -n %ENV_NAME% python -c "import sys; print(sys.executable)" 2^>nul`) do set "PYTHON_EXE=%%i"
-  if defined PYTHON_EXE if exist "!PYTHON_EXE!" set "LAUNCH_MODE=conda"
-)
-
-if not defined LAUNCH_MODE (
-  where python >nul 2>nul
-  if errorlevel 1 (
-    echo [ERROR] Neither conda nor python was found.
-    echo [ERROR] Install Miniconda/Anaconda, or add Python to PATH.
-    pause
-    exit /b 1
-  )
-  for /f "usebackq delims=" %%i in (`python -c "import sys; print(sys.executable)"`) do set "PYTHON_EXE=%%i"
-  if not exist "!PYTHON_EXE!" (
-    echo [ERROR] Failed to resolve current python path.
-    pause
-    exit /b 1
-  )
-  set "LAUNCH_MODE=python"
-)
-
 set "HOST=%BIND_HOST%"
 set "PORT=%PORT%"
 
-if /i "%LAUNCH_MODE%"=="conda" (
-  echo [INFO] Launch mode: conda
-  echo [INFO] Conda env: %ENV_NAME%
-) else (
-  echo [WARN] Conda env '%ENV_NAME%' not found. Falling back to current python.
-  echo [WARN] Some features like Solver may fail if dependencies are missing.
-  echo [INFO] Launch mode: python
-)
-
-echo [INFO] Python: !PYTHON_EXE!
 echo [INFO] Starting backend...
 
 if "%AUTO_OPEN_BROWSER%"=="1" (
   start "" cmd /c "timeout /t 5 /nobreak >nul && start http://localhost:%PORT%"
 )
 
-"!PYTHON_EXE!" main.py
+"%PYTHON_EXE%" main.py
 
 echo.
 echo [INFO] Backend exited.

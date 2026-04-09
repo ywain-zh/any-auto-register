@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { App as AntdApp, ConfigProvider, Layout, Menu, Button, Spin } from 'antd'
+import { App as AntdApp, ConfigProvider, Layout, Menu, Button, Spin, Typography, Space } from 'antd'
 import {
   DashboardOutlined,
   UserOutlined,
@@ -28,6 +28,7 @@ import { darkTheme, lightTheme } from './theme'
 import { apiFetch, clearToken, getToken } from '@/lib/utils'
 
 const { Sider, Content } = Layout
+const { Text } = Typography
 
 function ProtectedLayout() {
   const navigate = useNavigate()
@@ -166,128 +167,99 @@ function AppContent() {
   return (
     <ConfigProvider theme={currentTheme} locale={zhCN}>
       <AntdApp>
-      <Layout style={{ minHeight: '100vh' }}>
-        <Sider
-          collapsible
-          collapsed={collapsed}
-          onCollapse={setCollapsed}
-          style={{
-            background: currentTheme.token?.colorBgContainer,
-            borderRight: `1px solid ${currentTheme.token?.colorBorder}`,
-            position: 'sticky',
-            top: 0,
-            height: '100vh',
-            overflow: 'hidden',
-          }}
-          width={220}
-        >
-          <div
+        <Layout className="app-shell">
+          <Sider
+            collapsible
+            collapsed={collapsed}
+            onCollapse={setCollapsed}
+            className="app-shell__sider"
             style={{
-              height: 64,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderBottom: `1px solid ${currentTheme.token?.colorBorder}`,
+              background: currentTheme.token?.colorBgContainer,
+              borderRight: `1px solid ${currentTheme.token?.colorBorder}`,
             }}
+            width={284}
+            collapsedWidth={96}
           >
-            <DashboardOutlined style={{ fontSize: 20, color: currentTheme.token?.colorPrimary }} />
-            {!collapsed && (
-              <span
-                style={{
-                  marginLeft: 8,
-                  fontWeight: 600,
-                  fontSize: 14,
-                  color: currentTheme.token?.colorText,
-                }}
-              >
-                Account Manager
-              </span>
-            )}
-          </div>
-          <div
-            style={{
-              height: 'calc(100vh - 64px)',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            <Menu
-              mode="inline"
-              selectedKeys={getSelectedKey()}
-              defaultOpenKeys={['/accounts']}
-              items={menuItems}
-              onClick={({ key }) => navigate(key)}
-              style={{
-                borderRight: 0,
-                background: 'transparent',
-                flex: 1,
-                overflowY: 'auto',
-                minHeight: 0,
-              }}
-            />
-            <div
-              style={{
-                padding: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-                borderTop: `1px solid ${currentTheme.token?.colorBorder}`,
-              }}
-            >
-              <Button
-                block
-                icon={isLight ? <SunOutlined /> : <MoonOutlined />}
-                onClick={() => setThemeMode(isLight ? 'dark' : 'light')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: collapsed ? 'center' : 'space-between',
-                }}
-              >
-                {!collapsed && (isLight ? '亮色模式' : '暗色模式')}
-              </Button>
-              {hasPassword && (
+            <div className="app-shell__brand">
+              <div className="app-shell__brand-mark">
+                <DashboardOutlined />
+              </div>
+              {!collapsed && (
+                <div className="app-shell__brand-copy">
+                  <div className="app-shell__brand-title">Any Auto Register</div>
+                  <div className="app-shell__brand-subtitle">Teal dashboard workspace</div>
+                </div>
+              )}
+            </div>
+            <div className="app-shell__sider-body">
+              <Menu
+                mode="inline"
+                selectedKeys={getSelectedKey()}
+                defaultOpenKeys={['/accounts']}
+                items={menuItems}
+                onClick={({ key }) => navigate(key)}
+                className="app-shell__menu"
+              />
+              <div className="app-shell__footer">
+                {!collapsed && (
+                  <Space direction="vertical" size={4}>
+                    <Text style={{ color: currentTheme.token?.colorText, fontWeight: 600 }}>Workspace</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      统一管理注册、邮箱、监控与代理任务
+                    </Text>
+                  </Space>
+                )}
                 <Button
                   block
-                  danger
-                  icon={<LogoutOutlined />}
-                  onClick={() => { clearToken(); navigate('/login') }}
+                  icon={isLight ? <SunOutlined /> : <MoonOutlined />}
+                  onClick={() => setThemeMode(isLight ? 'dark' : 'light')}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: collapsed ? 'center' : 'space-between',
+                    height: 42,
                   }}
                 >
-                  {!collapsed && '退出登录'}
+                  {!collapsed && (isLight ? '亮色模式' : '暗色模式')}
                 </Button>
-              )}
+                {hasPassword && (
+                  <Button
+                    block
+                    danger
+                    icon={<LogoutOutlined />}
+                    onClick={() => { clearToken(); navigate('/login') }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: collapsed ? 'center' : 'space-between',
+                      height: 42,
+                    }}
+                  >
+                    {!collapsed && '退出登录'}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-        </Sider>
-        <Content
-          style={{
-            padding: 24,
-            overflowY: 'auto',
-            height: '100vh',
-            background: currentTheme.token?.colorBgLayout,
-          }}
-        >
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/accounts" element={<Accounts />} />
-            <Route path="/accounts/:platform" element={<Accounts />} />
-            <Route path="/mailboxes" element={<Navigate to="/mailboxes/inboxes" replace />} />
-            <Route path="/mailboxes/inboxes" element={<Mailboxes />} />
-            <Route path="/mailboxes/providers" element={<MailboxProviders />} />
-            <Route path="/register" element={<RegisterTaskPage />} />
-            <Route path="/history" element={<TaskHistory />} />
-            <Route path="/cpa-monitor" element={<CpaMonitor />} />
-            <Route path="/sub2api-monitor" element={<Sub2ApiMonitor />} />
-            <Route path="/proxies" element={<Proxies />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </Content>
-      </Layout>
+          </Sider>
+          <Content className="app-shell__content">
+            <div className="app-shell__content-inner">
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/accounts" element={<Accounts />} />
+                <Route path="/accounts/:platform" element={<Accounts />} />
+                <Route path="/mailboxes" element={<Navigate to="/mailboxes/inboxes" replace />} />
+                <Route path="/mailboxes/inboxes" element={<Mailboxes />} />
+                <Route path="/mailboxes/providers" element={<MailboxProviders />} />
+                <Route path="/register" element={<RegisterTaskPage />} />
+                <Route path="/history" element={<TaskHistory />} />
+                <Route path="/cpa-monitor" element={<CpaMonitor />} />
+                <Route path="/sub2api-monitor" element={<Sub2ApiMonitor />} />
+                <Route path="/proxies" element={<Proxies />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </div>
+          </Content>
+        </Layout>
       </AntdApp>
     </ConfigProvider>
   )

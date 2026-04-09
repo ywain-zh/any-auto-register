@@ -47,6 +47,7 @@ def normalize_mail_config(mail_api, email_domains=None):
         "accounts": cfg.get("accounts") or [],
         "base_dir": str(cfg.get("base_dir") or os.getcwd()).strip(),
         "account_index": int(cfg.get("account_index") or 0),
+        "fixed_email": str(cfg.get("fixed_email") or "").strip(),
     }
 
 
@@ -158,6 +159,9 @@ def _generate_email(email_domains):
 
 def create_mailbox_address(mail_cfg, email_domains):
     cfg = normalize_mail_config(mail_cfg, email_domains)
+    fixed_email = str(cfg.get("fixed_email") or "").strip()
+    if fixed_email:
+        return fixed_email
     if cfg["provider"] == "hotmail_api":
         email = _pick_hotmail_account(cfg).get("email", "")
         if isinstance(mail_cfg, dict):

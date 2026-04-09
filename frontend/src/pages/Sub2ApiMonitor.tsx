@@ -18,6 +18,8 @@ const SUMMARY_CANDIDATES = [
   { title: '总账号', keys: ['检查总数', 'total', 'total_accounts', 'account_total', 'total_count'], color: '#60a5fa' },
   { title: '可用账号', keys: ['可用账号', 'available', 'available_accounts', 'success', 'success_count'], color: '#34d399' },
   { title: '配额耗尽', keys: ['配额耗尽', 'quota_exhausted', 'quota_exceeded', 'insufficient_quota'], color: '#f59e0b' },
+  { title: '401账号', keys: ['401账号', 'account_401', 'unauthorized_401', 'unauthorized'], color: '#ef4444' },
+  { title: '异常', keys: ['异常', 'abnormal', 'failed_abnormal', 'error_accounts'], color: '#fb7185' },
   { title: '已禁用', keys: ['已禁用', 'disabled', 'disabled_accounts', 'paused'], color: '#f87171' },
   { title: '不可用', keys: ['不可用', 'unavailable', 'invalid', 'failed_other', 'failed_count_other'], color: '#fb7185' },
   { title: '待处理', keys: ['待处理', 'pending', 'pending_accounts', 'pending_count'], color: '#a78bfa' },
@@ -56,6 +58,12 @@ export default function Sub2ApiMonitor() {
     try {
       const data = await apiFetch('/sub2api-monitor/run', {
         method: 'POST',
+        body: JSON.stringify({
+          page_size: 100,
+          max_pages: 20,
+          enable_remote_test: true,
+          stop_on_error: false,
+        }),
       })
       setResult(data)
       setRunState('success')

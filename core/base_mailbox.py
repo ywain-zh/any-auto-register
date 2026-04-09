@@ -135,6 +135,18 @@ class BaseMailbox(ABC):
         text = re.sub(r"\s+", " ", text).strip()
         return text
 
+    def _fix_mojibake_text(self, value: Any) -> str:
+        text = str(value or "")
+        if not text:
+            return ""
+        try:
+            repaired = text.encode("latin1", errors="ignore").decode("utf-8", errors="ignore").strip()
+            if repaired and repaired != text:
+                return repaired
+        except Exception:
+            pass
+        return text
+
     @abstractmethod
     def get_current_ids(self, account: MailboxAccount) -> set:
         """返回当前邮件 ID 集合（用于过滤旧邮件）"""
@@ -270,6 +282,11 @@ def create_mailbox(
             api_key=extra.get("gptmail_api_key", ""),
             domain=extra.get("gptmail_domain", ""),
             proxy=proxy,
+        )
+    elif provider == "gmail_alias":
+        return GmailAliasMailbox(
+            base_email=extra.get("gmail_alias_base_email", ""),
+            app_password=extra.get("gmail_alias_app_password", ""),
         )
     elif provider == "cfworker":
         return CFWorkerMailbox(
@@ -870,9 +887,9 @@ class CloudMailMailbox(BaseMailbox):
                     if mail_id in seen:
                         continue
                     seen.add(mail_id)
-                    subject = str(item.get("subject") or "")
-                    text = str(item.get("text") or "")
-                    content = str(item.get("content") or "")
+                    subject = self._fix_mojibake_text(item.get("subject") or "")
+                    text = self._fix_mojibake_text(item.get("text") or "")
+                    content = self._fix_mojibake_text(item.get("content") or "")
                     source = f"{subject}\n{text}\n{content}"
                     code = self._safe_extract(source, code_pattern)
                     if code:
@@ -886,6 +903,284 @@ class CloudMailMailbox(BaseMailbox):
             poll_interval=5,
             poll_once=poll_once,
             timeout_message=f"Cloud Mail 等待验证码超时 ({timeout}s)",
+        )
+
+
+class GmailAliasMailbox(BaseMailbox):
+    """Gmail 别名邮箱：生成 plus alias，实际通过原始 Gmail IMAP 收信"""
+
+    _NAME_POOL = [
+        "lynne",
+        "claire",
+        "audrey",
+        "victoria",
+        "amelia",
+        "sophia",
+        "natalie",
+        "stella",
+        "elena",
+        "hazel",
+        "violet",
+        "grace",
+        "lucy",
+        "chloe",
+        "zoe",
+        "olivia",
+        "ethan",
+        "adrian",
+        "owen",
+        "hugo",
+        "ian",
+        "julian",
+        "arthur",
+        "edwin",
+    ]
+
+    def __init__(self, base_email: str, app_password: str):
+        self.base_email = str(base_email or "").strip()
+        self.app_password = str(app_password or "").strip()
+        self.imap_host = "imap.gmail.com"
+        self.imap_port = 993
+
+    def _ensure_configured(self) -> None:
+        if not self.base_email:
+            raise RuntimeError("谷歌别名邮箱未配置原始 Gmail 邮箱")
+        if "@" not in self.base_email:
+            raise RuntimeError("原始 Gmail 邮箱格式不正确")
+        if self.base_email.split("@", 1)[1].lower() != "gmail.com":
+            raise RuntimeError("谷歌别名邮箱当前仅支持 gmail.com")
+        if not self.app_password:
+            raise RuntimeError("谷歌别名邮箱未配置 Gmail 授权密码")
+
+    def _generate_alias_email(self) -> str:
+        local, domain = self.base_email.split("@", 1)
+        alias_name = random.choice(self._NAME_POOL)
+        digits = "".join(random.choices("0123456789", k=random.choice([2, 3])))
+        return f"{local}+{alias_name}{digits}@{domain}"
+
+    def _connect_imap(self):
+        import imaplib
+
+        self._ensure_configured()
+        client = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+        client.login(self.base_email, self.app_password)
+        client.select("INBOX")
+        return client
+
+    def _decode_header_value(self, value: Any) -> str:
+        from email.header import decode_header, make_header
+
+        text = str(value or "")
+        if not text:
+            return ""
+        try:
+            return str(make_header(decode_header(text))).strip()
+        except Exception:
+            return text.strip()
+
+    def _extract_text_from_message(self, message) -> str:
+        texts: list[str] = []
+        try:
+            if message.is_multipart():
+                for part in message.walk():
+                    content_type = str(part.get_content_type() or "").lower()
+                    if part.get_content_maintype() == "multipart":
+                        continue
+                    payload = part.get_payload(decode=True)
+                    if payload is None:
+                        raw = part.get_payload()
+                        if isinstance(raw, str):
+                            texts.append(raw)
+                        continue
+                    charset = part.get_content_charset() or "utf-8"
+                    try:
+                        decoded = payload.decode(charset, errors="ignore")
+                    except Exception:
+                        decoded = payload.decode("utf-8", errors="ignore")
+                    texts.append(decoded)
+                    if content_type == "text/html":
+                        texts.append(self._decode_raw_content(decoded))
+            else:
+                payload = message.get_payload(decode=True)
+                if isinstance(payload, bytes):
+                    charset = message.get_content_charset() or "utf-8"
+                    try:
+                        texts.append(payload.decode(charset, errors="ignore"))
+                    except Exception:
+                        texts.append(payload.decode("utf-8", errors="ignore"))
+                else:
+                    texts.append(str(payload or ""))
+        except Exception:
+            pass
+        joined = "\n".join([item for item in texts if str(item or "").strip()])
+        return self._decode_raw_content(joined) or joined
+
+    def _message_matches_alias(self, message, alias_email: str) -> bool:
+        alias = str(alias_email or "").strip().lower()
+        if not alias:
+            return False
+        header_candidates = [
+            self._decode_header_value(message.get("Delivered-To")),
+            self._decode_header_value(message.get("To")),
+            self._decode_header_value(message.get("X-Original-To")),
+            self._decode_header_value(message.get("Envelope-To")),
+            self._decode_header_value(message.get("Cc")),
+        ]
+        for value in header_candidates:
+            if alias and alias in str(value or "").lower():
+                return True
+        try:
+            header_blob = "\n".join(f"{k}: {v}" for k, v in message.items())
+            if alias in header_blob.lower():
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _message_timestamp(self, message) -> float:
+        from email.utils import parsedate_to_datetime
+
+        try:
+            raw = self._decode_header_value(message.get("Date"))
+            if not raw:
+                return 0
+            dt = parsedate_to_datetime(raw)
+            if dt is None:
+                return 0
+            return dt.timestamp()
+        except Exception:
+            return 0
+
+    def _fetch_message(self, client, uid: str):
+        import email
+
+        status, data = client.uid("fetch", uid, "(BODY.PEEK[] FLAGS)")
+        if status != "OK" or not data:
+            return None
+        for item in data:
+            if isinstance(item, tuple) and len(item) >= 2:
+                payload = item[1]
+                if isinstance(payload, bytes):
+                    try:
+                        return email.message_from_bytes(payload)
+                    except Exception:
+                        return None
+        return None
+
+    def _mark_seen(self, client, uid: str) -> None:
+        try:
+            client.uid("store", uid, "+FLAGS", r"(\Seen)")
+        except Exception:
+            pass
+
+    def _search_uids(self, client, criterion: str) -> list[str]:
+        status, data = client.uid("search", None, criterion)
+        if status != "OK" or not data:
+            return []
+        raw = data[0]
+        if isinstance(raw, bytes):
+            raw = raw.decode(errors="ignore")
+        return [item for item in str(raw or "").split() if item]
+
+    def get_email(self) -> MailboxAccount:
+        self._ensure_configured()
+        alias_email = self._generate_alias_email()
+        return MailboxAccount(
+            email=alias_email,
+            account_id=alias_email,
+            extra={
+                "provider": "gmail_alias",
+                "base_email": self.base_email,
+                "alias_email": alias_email,
+            },
+        )
+
+    def get_current_ids(self, account: MailboxAccount) -> set:
+        client = None
+        try:
+            client = self._connect_imap()
+            return set(self._search_uids(client, "ALL"))
+        except Exception:
+            return set()
+        finally:
+            if client is not None:
+                try:
+                    client.logout()
+                except Exception:
+                    pass
+
+    def wait_for_code(
+        self,
+        account: MailboxAccount,
+        keyword: str = "",
+        timeout: int = 120,
+        before_ids: set = None,
+        code_pattern: str = None,
+        **kwargs,
+    ) -> str:
+        seen = {str(mid) for mid in (before_ids or set()) if mid}
+        exclude_codes = {
+            str(code) for code in (kwargs.get("exclude_codes") or set()) if code
+        }
+        otp_sent_at = kwargs.get("otp_sent_at")
+        alias_email = str(account.account_id or account.email or "").strip().lower()
+
+        def poll_once() -> Optional[str]:
+            client = None
+            try:
+                client = self._connect_imap()
+                ordered_uids = self._search_uids(client, "UNSEEN")
+                if not ordered_uids:
+                    ordered_uids = self._search_uids(client, "ALL")
+                for uid in reversed(ordered_uids):
+                    if uid in seen:
+                        continue
+                    seen.add(uid)
+                    message = self._fetch_message(client, uid)
+                    if message is None:
+                        continue
+                    if not self._message_matches_alias(message, alias_email):
+                        continue
+                    mail_ts = self._message_timestamp(message)
+                    if otp_sent_at and mail_ts and mail_ts < float(otp_sent_at) - 2:
+                        continue
+                    subject = self._decode_header_value(message.get("Subject"))
+                    header_blob = "\n".join(
+                        [
+                            f"Delivered-To: {self._decode_header_value(message.get('Delivered-To'))}",
+                            f"To: {self._decode_header_value(message.get('To'))}",
+                            f"X-Original-To: {self._decode_header_value(message.get('X-Original-To'))}",
+                            f"From: {self._decode_header_value(message.get('From'))}",
+                            f"Subject: {subject}",
+                        ]
+                    )
+                    content = self._extract_text_from_message(message)
+                    source = f"{header_blob}\n{content}"
+                    if keyword and keyword.lower() not in source.lower():
+                        continue
+                    code = self._safe_extract(source, code_pattern)
+                    if code and code in exclude_codes:
+                        self._mark_seen(client, uid)
+                        continue
+                    if code:
+                        self._mark_seen(client, uid)
+                        self._log(f"[GmailAlias] 收到验证码: {code} ({alias_email})")
+                        return code
+            except Exception:
+                return None
+            finally:
+                if client is not None:
+                    try:
+                        client.logout()
+                    except Exception:
+                        pass
+            return None
+
+        return self._run_polling_wait(
+            timeout=timeout,
+            poll_interval=5,
+            poll_once=poll_once,
+            timeout_message=f"Gmail Alias 等待验证码超时 ({timeout}s)",
         )
 
 
@@ -936,6 +1231,7 @@ class HotmailMailbox(BaseMailbox):
                 "refresh_token": row.refresh_token,
                 "mailbox_password": row.mailbox_password,
                 "mailbox_service_id": row.mailbox_service_id,
+                "receive_mode": getattr(row, "receive_mode", "graph") or "graph",
             },
         )
 
@@ -948,6 +1244,7 @@ class HotmailMailbox(BaseMailbox):
                 email=account.email,
                 client_id=str((account.extra or {}).get("client_id") or ""),
                 refresh_token=str((account.extra or {}).get("refresh_token") or ""),
+                receive_mode=str((account.extra or {}).get("receive_mode") or "graph"),
             )
             items = result.get("items") or []
             return {
@@ -981,6 +1278,7 @@ class HotmailMailbox(BaseMailbox):
                 email=account.email,
                 client_id=str((account.extra or {}).get("client_id") or ""),
                 refresh_token=str((account.extra or {}).get("refresh_token") or ""),
+                receive_mode=str((account.extra or {}).get("receive_mode") or "graph"),
             )
             for item in result.get("items") or []:
                 mail_id = str(item.get("message_id") or "").strip()

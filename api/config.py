@@ -38,6 +38,8 @@ CONFIG_KEYS = [
     "gptmail_base_url",
     "gptmail_api_key",
     "gptmail_domain",
+    "gmail_alias_base_email",
+    "gmail_alias_app_password",
     "cfworker_api_url",
     "cfworker_admin_token",
     "cfworker_custom_auth",

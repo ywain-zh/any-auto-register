@@ -43,6 +43,20 @@ class TaskLogBatchDeleteRequest(BaseModel):
     ids: list[int]
 
 
+def _first_non_empty(*values):
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+            continue
+        if value != "":
+            return value
+    return ""
+
+
 def _ensure_task_exists(task_id: str) -> None:
     if not _task_store.exists(task_id):
         raise HTTPException(404, "任务不存在")
@@ -336,6 +350,134 @@ def _run_codex_via_original_scripts(
     }
 
 
+def _extract_codex_bind_credentials(bind_result: dict | None) -> dict:
+    bind_result = bind_result or {}
+    persist_response = bind_result.get("persist_response")
+    if not isinstance(persist_response, dict):
+        persist_response = {}
+    credentials = persist_response.get("credentials")
+    if not isinstance(credentials, dict):
+        credentials = {}
+    exchange_result = bind_result.get("exchange_result")
+    if not isinstance(exchange_result, dict):
+        exchange_result = {}
+
+    return {
+        "access_token": _first_non_empty(
+            credentials.get("access_token"),
+            exchange_result.get("access_token"),
+            bind_result.get("access_token"),
+        ),
+        "refresh_token": _first_non_empty(
+            credentials.get("refresh_token"),
+            exchange_result.get("refresh_token"),
+            bind_result.get("refresh_token"),
+        ),
+        "id_token": _first_non_empty(
+            credentials.get("id_token"),
+            exchange_result.get("id_token"),
+            bind_result.get("id_token"),
+        ),
+        "chatgpt_account_id": _first_non_empty(
+            credentials.get("chatgpt_account_id"),
+            exchange_result.get("chatgpt_account_id"),
+            bind_result.get("chatgpt_account_id"),
+        ),
+        "chatgpt_user_id": _first_non_empty(
+            credentials.get("chatgpt_user_id"),
+            exchange_result.get("chatgpt_user_id"),
+            bind_result.get("chatgpt_user_id"),
+        ),
+        "organization_id": _first_non_empty(
+            credentials.get("organization_id"),
+            exchange_result.get("organization_id"),
+            bind_result.get("organization_id"),
+        ),
+        "client_id": _first_non_empty(
+            credentials.get("client_id"),
+            exchange_result.get("client_id"),
+            bind_result.get("client_id"),
+        ),
+        "workspace_id": _first_non_empty(
+            credentials.get("workspace_id"),
+            exchange_result.get("workspace_id"),
+            bind_result.get("workspace_id"),
+        ),
+        "expires_in": _first_non_empty(
+            credentials.get("expires_in"),
+            exchange_result.get("expires_in"),
+            bind_result.get("expires_in"),
+        ),
+        "expires_at": _first_non_empty(
+            credentials.get("expires_at"),
+            exchange_result.get("expires_at"),
+            bind_result.get("expires_at"),
+        ),
+    }
+
+
+
+def _build_codex_account_from_result(result: dict):
+    from core.base_platform import Account, AccountStatus
+
+    result = result or {}
+    detail = result.get("detail")
+    if not isinstance(detail, dict):
+        detail = {}
+    bind_result = detail.get("bind")
+    if not isinstance(bind_result, dict):
+        bind_result = {}
+    credentials = _extract_codex_bind_credentials(bind_result)
+
+    extra = {
+        "access_token": credentials.get("access_token") or "",
+        "refresh_token": credentials.get("refresh_token") or "",
+        "id_token": credentials.get("id_token") or "",
+        "client_id": credentials.get("client_id") or "",
+        "organization_id": credentials.get("organization_id") or "",
+        "workspace_id": credentials.get("workspace_id") or "",
+        "chatgpt_account_id": credentials.get("chatgpt_account_id") or "",
+        "chatgpt_user_id": credentials.get("chatgpt_user_id") or "",
+        "codex_bind_target": bind_result.get("target") or "",
+        "codex_bind_status": bind_result.get("status") or "",
+    }
+    bind_message = _first_non_empty(bind_result.get("message"))
+    if bind_message:
+        extra["codex_bind_message"] = bind_message
+    sub2api_account_id = _first_non_empty(bind_result.get("account_id"))
+    if sub2api_account_id:
+        extra["sub2api_account_id"] = sub2api_account_id
+    sync_state = bind_result.get("sync_state")
+    if isinstance(sync_state, dict) and sync_state:
+        sync_key = str(bind_result.get("target") or "codex")
+        extra["sync_statuses"] = {
+            sync_key: sync_state,
+        }
+    expires_in = credentials.get("expires_in")
+    if expires_in not in ("", None):
+        extra["expires_in"] = expires_in
+    expires_at = credentials.get("expires_at")
+    if expires_at not in ("", None):
+        extra["expires_at"] = expires_at
+
+    return Account(
+        platform="codex",
+        email=str(result.get("email") or ""),
+        password=str(result.get("password") or ""),
+        user_id=str(
+            _first_non_empty(
+                credentials.get("chatgpt_account_id"),
+                credentials.get("chatgpt_user_id"),
+            )
+            or ""
+        ),
+        region=str(result.get("region") or ""),
+        token=str(credentials.get("access_token") or ""),
+        status=AccountStatus.REGISTERED,
+        extra=extra,
+    )
+
+
 def _create_task_record(
     task_id: str, req: RegisterTaskRequest, source: str, meta: dict | None = None
 ):
@@ -346,6 +488,7 @@ def _create_task_record(
         source=source,
         meta=meta,
     )
+
 
 
 def enqueue_register_task(
@@ -498,17 +641,16 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 _log(task_id, f"开始注册第 {i + 1}/{req.count} 个账号")
                 if _proxy:
                     _log(task_id, f"使用代理: {_proxy}")
+                account = None
+                codex_result = None
                 if req.platform == "codex":
-                    result = _run_codex_via_original_scripts(task_id, req, _proxy)
-                    current_email = result.get("email") or current_email
-                    _save_task_log(
-                        req.platform, current_email, "success", detail=result
+                    codex_result = _run_codex_via_original_scripts(task_id, req, _proxy)
+                    account = _build_codex_account_from_result(codex_result)
+                else:
+                    account = _platform.register(
+                        email=req.email or None,
+                        password=req.password,
                     )
-                    return AttemptResult.success()
-                account = _platform.register(
-                    email=req.email or None,
-                    password=req.password,
-                )
                 current_email = account.email or current_email
                 if isinstance(account.extra, dict):
                     mailbox_service_id = merged_extra.get("mailbox_service_id")
@@ -554,7 +696,12 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 if _proxy:
                     proxy_pool.report_success(_proxy)
                 _log(task_id, f"[OK] 注册成功: {account.email}")
-                _save_task_log(req.platform, account.email, "success")
+                _save_task_log(
+                    req.platform,
+                    account.email,
+                    "success",
+                    detail=codex_result if req.platform == "codex" else None,
+                )
                 _auto_upload_integrations(task_id, saved_account or account)
                 cashier_url = (account.extra or {}).get("cashier_url", "")
                 if cashier_url:

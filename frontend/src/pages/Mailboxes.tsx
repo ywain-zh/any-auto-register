@@ -5,6 +5,7 @@ import {
   Empty,
   Input,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Table,
@@ -13,6 +14,8 @@ import {
   message,
 } from 'antd'
 import {
+  DeleteOutlined,
+  KeyOutlined,
   MailOutlined,
   ReloadOutlined,
   UploadOutlined,
@@ -22,6 +25,13 @@ import { apiFetch } from '@/lib/utils'
 const { Text, Paragraph } = Typography
 
 const HOTMAIL_PROVIDER = 'hotmail'
+
+const REGISTER_STATUS_LABELS: Record<string, { color?: string; text: string }> = {
+  success: { color: 'success', text: '成功' },
+  failed: { color: 'error', text: '失败' },
+  pending_bind: { color: 'gold', text: '待绑定' },
+  registered: { color: 'processing', text: '已注册' },
+}
 
 type MailboxService = {
   id: number
@@ -40,6 +50,8 @@ type HotmailAccount = {
   mailbox_password: string
   client_id: string
   refresh_token: string
+  receive_mode: 'graph' | 'imap'
+  mailbox_status: 'valid' | 'invalid' | 'unknown'
   register_status: string
   claimed_at?: string | null
   last_error: string
@@ -73,6 +85,12 @@ function maskToken(value?: string) {
   return `${token.slice(0, 8)}...${token.slice(-8)}`
 }
 
+function getReceiveModeTag(value?: string) {
+  const mode = String(value || 'graph').toLowerCase()
+  if (mode === 'imap') return <Tag color="purple">IMAP</Tag>
+  return <Tag color="blue">Graph</Tag>
+}
+
 function getFolderTag(value: string) {
   const folder = String(value || '')
   if (folder === 'Junk') return <Tag color="warning">垃圾箱</Tag>
@@ -80,13 +98,18 @@ function getFolderTag(value: string) {
   return <Tag>{folder || '-'}</Tag>
 }
 
-function getStatusTag(value: string) {
-  const status = String(value || '')
-  if (status === 'success') return <Tag color="success">成功</Tag>
-  if (status === 'failed') return <Tag color="error">失败</Tag>
-  if (status === 'pending_bind') return <Tag color="gold">待绑定</Tag>
-  if (status === 'registered') return <Tag color="processing">已注册</Tag>
-  return <Tag>{status || '未注册'}</Tag>
+function getMailboxStatusTag(value?: string) {
+  const status = String(value || 'unknown').toLowerCase()
+  if (status === 'valid') return <Tag color="success">有效</Tag>
+  if (status === 'invalid') return <Tag color="error">无效</Tag>
+  return <Tag>未知</Tag>
+}
+
+function getRegisterStatusTag(value?: string) {
+  const key = String(value || '').toLowerCase()
+  const config = REGISTER_STATUS_LABELS[key]
+  if (config) return <Tag color={config.color}>{config.text}</Tag>
+  return <Tag>{value || '未注册'}</Tag>
 }
 
 export default function Mailboxes() {
@@ -95,6 +118,8 @@ export default function Mailboxes() {
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null)
   const [accounts, setAccounts] = useState<HotmailAccount[]>([])
   const [accountsLoading, setAccountsLoading] = useState(false)
+  const [refreshingAccountId, setRefreshingAccountId] = useState<number | null>(null)
+  const [deletingAccountId, setDeletingAccountId] = useState<number | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
@@ -214,6 +239,49 @@ export default function Mailboxes() {
     }
   }
 
+  const handleRefreshToken = async (record: HotmailAccount) => {
+    if (!selectedServiceId) {
+      message.warning('请先选择微软邮箱服务')
+      return
+    }
+    setRefreshingAccountId(record.id)
+    try {
+      const result = await apiFetch(`/mailboxes/${selectedServiceId}/hotmail/accounts/${record.id}/refresh-token`, {
+        method: 'POST',
+      })
+      const mode = String(result?.receive_mode || record.receive_mode || 'graph').toUpperCase()
+      const preview = String(result?.refresh_token_preview || '')
+      const rotatedText = result?.refresh_token_updated ? '已更新 refresh_token' : 'refresh_token 未轮换'
+      message.success(`刷新令牌成功（${mode}，${rotatedText}${preview ? `，${preview}` : ''}）`)
+      await loadAccounts(selectedServiceId, page, pageSize)
+    } catch (e: any) {
+      message.error(`刷新令牌失败: ${e.message}`)
+    } finally {
+      setRefreshingAccountId(null)
+    }
+  }
+
+  const handleDeleteAccount = async (record: HotmailAccount) => {
+    if (!selectedServiceId) {
+      message.warning('请先选择微软邮箱服务')
+      return
+    }
+    setDeletingAccountId(record.id)
+    try {
+      await apiFetch(`/mailboxes/${selectedServiceId}/hotmail/accounts/${record.id}`, {
+        method: 'DELETE',
+      })
+      message.success(`已删除账号：${record.email}`)
+      const hasSingleRowOnPage = accounts.length === 1
+      const nextPage = hasSingleRowOnPage && page > 1 ? page - 1 : page
+      await loadAccounts(selectedServiceId, nextPage, pageSize)
+    } catch (e: any) {
+      message.error(`删除账号失败: ${e.message}`)
+    } finally {
+      setDeletingAccountId(null)
+    }
+  }
+
   const handleOpenMails = async (record?: HotmailAccount | null) => {
     const target = record || selectedAccount
     if (!selectedServiceId || !target) {
@@ -255,10 +323,24 @@ export default function Mailboxes() {
       render: (value: string) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{maskToken(value)}</span>,
     },
     {
-      title: '状态',
+      title: '模式',
+      dataIndex: 'receive_mode',
+      key: 'receive_mode',
+      width: 100,
+      render: (value: string) => getReceiveModeTag(value),
+    },
+    {
+      title: '邮箱状态',
+      dataIndex: 'mailbox_status',
+      key: 'mailbox_status',
+      width: 110,
+      render: (value: string) => getMailboxStatusTag(value),
+    },
+    {
+      title: '注册状态',
       dataIndex: 'register_status',
       key: 'register_status',
-      render: (value: string) => getStatusTag(value),
+      render: (value: string) => getRegisterStatusTag(value),
     },
     {
       title: '最近错误',
@@ -276,11 +358,37 @@ export default function Mailboxes() {
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 300,
       render: (_: any, record: HotmailAccount) => (
-        <Button size="small" icon={<MailOutlined />} onClick={() => handleOpenMails(record)}>
-          查邮件
-        </Button>
+        <Space size={8} wrap>
+          <Button
+            size="small"
+            icon={<KeyOutlined />}
+            loading={refreshingAccountId === record.id}
+            onClick={() => handleRefreshToken(record)}
+          >
+            刷新令牌
+          </Button>
+          <Button size="small" icon={<MailOutlined />} onClick={() => handleOpenMails(record)}>
+            查邮件
+          </Button>
+          <Popconfirm
+            title="删除微软邮箱账号"
+            description={`确认删除 ${record.email} 吗？`}
+            okText="删除"
+            cancelText="取消"
+            onConfirm={() => handleDeleteAccount(record)}
+          >
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={deletingAccountId === record.id}
+            >
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ]
@@ -389,7 +497,7 @@ export default function Mailboxes() {
                 loadAccounts(selectedServiceId, nextPage, nextPageSize)
               },
             }}
-            scroll={{ x: 1120 }}
+            scroll={{ x: 1320 }}
           />
         ) : (
           <Empty description="请先新增或选择一个微软邮箱服务" />
@@ -427,10 +535,15 @@ export default function Mailboxes() {
           <Text type="secondary">支持 TXT 导入，也支持直接粘贴多行账号内容。</Text>
         </Space>
         <Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          每行格式：
+          每行格式支持：
           <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 4px', borderRadius: 4 }}>
             邮箱----密码----client_id----refresh_token
           </code>
+          或
+          <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 4px', borderRadius: 4, marginLeft: 8 }}>
+            邮箱----密码----client_id----refresh_token----mode
+          </code>
+          ，其中 mode 仅支持 graph / imap，省略时默认 graph。
         </Paragraph>
         <Input.TextArea
           value={importText}

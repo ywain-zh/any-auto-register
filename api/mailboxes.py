@@ -13,11 +13,15 @@ from sqlmodel import Session, select
 from core.base_mailbox import MailboxAccount, create_mailbox
 from core.db import MailboxServiceModel, HotmailAccountModel, get_session
 from services.hotmail_accounts import (
+    HOTMAIL_MAILBOX_STATUS_VALID,
+    classify_hotmail_mailbox_error,
     fetch_hotmail_latest_mail,
     get_hotmail_service_config,
     import_hotmail_accounts,
     list_hotmail_accounts,
     list_hotmail_mails,
+    refresh_hotmail_token,
+    set_hotmail_mailbox_status,
     update_hotmail_registration_status,
 )
 
@@ -147,6 +151,25 @@ MAILBOX_PROVIDER_DEFINITIONS = [
             {"key": "gptmail_base_url", "label": "API URL", "placeholder": "https://mail.chatgpt.org.uk"},
             {"key": "gptmail_api_key", "label": "API Key", "secret": True},
             {"key": "gptmail_domain", "label": "邮箱域名", "placeholder": "example.com"},
+        ],
+    },
+    {
+        "key": "gmail_alias",
+        "label": "谷歌别名邮箱",
+        "description": "使用 Gmail 原始邮箱 + App Password 生成别名并通过 IMAP 收信。",
+        "fields": [
+            {
+                "key": "gmail_alias_base_email",
+                "label": "原始 Gmail 邮箱",
+                "placeholder": "zys6626@gmail.com",
+                "required": True,
+            },
+            {
+                "key": "gmail_alias_app_password",
+                "label": "Gmail 授权密码",
+                "secret": True,
+                "required": True,
+            },
         ],
     },
     {
@@ -324,6 +347,7 @@ def build_codex_runtime_mail_api(
             "provider": "inbucket",
             "url": f"{_codex_bridge_base_url()}/bridge/{bridge['bridge_token']}",
             "domains": [bridge["email"].split("@", 1)[1]] if "@" in bridge["email"] else [],
+            "fixed_email": bridge["email"],
             "base_dir": str(ROOT_DIR / "codex-pool-manager" / "codex-pool-manager"),
         },
         bridge,
@@ -444,6 +468,15 @@ def _serialize(item: MailboxServiceModel):
     }
 
 
+def _mask_refresh_token(value: str) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    if len(token) <= 18:
+        return token
+    return f"{token[:8]}...{token[-8:]}"
+
+
 def _serialize_hotmail_account(item):
     return {
         "id": item.id,
@@ -452,6 +485,8 @@ def _serialize_hotmail_account(item):
         "mailbox_password": item.mailbox_password,
         "client_id": item.client_id,
         "refresh_token": item.refresh_token,
+        "receive_mode": getattr(item, "receive_mode", "graph") or "graph",
+        "mailbox_status": getattr(item, "mailbox_status", "unknown") or "unknown",
         "register_status": item.register_status,
         "claimed_at": item.claimed_at,
         "last_error": item.last_error,
@@ -459,6 +494,41 @@ def _serialize_hotmail_account(item):
         "created_at": item.created_at,
         "updated_at": item.updated_at,
     }
+
+
+def _update_hotmail_account_health(
+    *,
+    session: Session,
+    row: HotmailAccountModel,
+    mailbox_status: str,
+    last_error: str | None = None,
+    refresh_token: str | None = None,
+) -> HotmailAccountModel:
+    return set_hotmail_mailbox_status(
+        session=session,
+        row=row,
+        mailbox_status=mailbox_status,
+        last_error=last_error,
+        refresh_token=refresh_token,
+    )
+
+
+def _mark_hotmail_account_status_from_error(
+    *,
+    session: Session,
+    row: HotmailAccountModel,
+    error: Exception | str,
+) -> str:
+    message = str(error or "")
+    mailbox_status = classify_hotmail_mailbox_error(message)
+    if mailbox_status != (getattr(row, "mailbox_status", "unknown") or "unknown") or message != str(row.last_error or ""):
+        _update_hotmail_account_health(
+            session=session,
+            row=row,
+            mailbox_status=mailbox_status,
+            last_error=message,
+        )
+    return message
 
 
 @router.get("/providers")
@@ -594,15 +664,19 @@ def get_hotmail_latest_mail_api(
             email=row.email,
             client_id=row.client_id,
             refresh_token=row.refresh_token,
+            receive_mode=getattr(row, "receive_mode", "graph") or "graph",
         )
     except RuntimeError as exc:
-        raise HTTPException(400, str(exc))
+        message = _mark_hotmail_account_status_from_error(session=session, row=row, error=exc)
+        raise HTTPException(400, message)
     new_refresh_token = str(result.get("new_refresh_token") or "").strip()
-    if new_refresh_token and new_refresh_token != row.refresh_token:
-        row.refresh_token = new_refresh_token
-        row.updated_at = _utcnow()
-        session.add(row)
-        session.commit()
+    _update_hotmail_account_health(
+        session=session,
+        row=row,
+        mailbox_status=HOTMAIL_MAILBOX_STATUS_VALID,
+        last_error="",
+        refresh_token=new_refresh_token or None,
+    )
     return result
 
 
@@ -648,16 +722,81 @@ def list_hotmail_account_mails_api(
             email=row.email,
             client_id=row.client_id,
             refresh_token=row.refresh_token,
+            receive_mode=getattr(row, "receive_mode", "graph") or "graph",
         )
     except RuntimeError as exc:
-        raise HTTPException(400, str(exc))
+        message = _mark_hotmail_account_status_from_error(session=session, row=row, error=exc)
+        raise HTTPException(400, message)
     new_refresh_token = str(result.get("new_refresh_token") or "").strip()
-    if new_refresh_token and new_refresh_token != row.refresh_token:
-        row.refresh_token = new_refresh_token
-        row.updated_at = _utcnow()
-        session.add(row)
-        session.commit()
+    _update_hotmail_account_health(
+        session=session,
+        row=row,
+        mailbox_status=HOTMAIL_MAILBOX_STATUS_VALID,
+        last_error="",
+        refresh_token=new_refresh_token or None,
+    )
     return {"items": result.get("items") or []}
+
+
+@router.delete("/{mailbox_id}/hotmail/accounts/{account_id}")
+def delete_hotmail_account_api(
+    mailbox_id: int,
+    account_id: int,
+    session: Session = Depends(get_session),
+):
+    try:
+        get_hotmail_service_config(session, mailbox_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    row = session.get(HotmailAccountModel, account_id)
+    if not row or row.mailbox_service_id != mailbox_id:
+        raise HTTPException(404, "Hotmail 账号不存在")
+    session.delete(row)
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/{mailbox_id}/hotmail/accounts/{account_id}/refresh-token")
+def refresh_hotmail_account_token_api(
+    mailbox_id: int,
+    account_id: int,
+    session: Session = Depends(get_session),
+):
+    try:
+        get_hotmail_service_config(session, mailbox_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    row = session.get(HotmailAccountModel, account_id)
+    if not row or row.mailbox_service_id != mailbox_id:
+        raise HTTPException(404, "Hotmail 账号不存在")
+    try:
+        result = refresh_hotmail_token(
+            client_id=row.client_id,
+            refresh_token=row.refresh_token,
+            receive_mode=getattr(row, "receive_mode", "graph") or "graph",
+        )
+    except RuntimeError as exc:
+        message = _mark_hotmail_account_status_from_error(session=session, row=row, error=exc)
+        raise HTTPException(400, message)
+    latest_refresh_token = str(result.get("refresh_token") or "").strip()
+    refresh_token_updated = bool(
+        latest_refresh_token and latest_refresh_token != str(row.refresh_token or "").strip()
+    )
+    row = _update_hotmail_account_health(
+        session=session,
+        row=row,
+        mailbox_status=HOTMAIL_MAILBOX_STATUS_VALID,
+        last_error="",
+        refresh_token=latest_refresh_token or None,
+    )
+    return {
+        "ok": True,
+        "receive_mode": result.get("receive_mode") or "graph",
+        "token_url": result.get("token_url") or "",
+        "scope": result.get("scope") or "",
+        "refresh_token_updated": refresh_token_updated,
+        "refresh_token_preview": _mask_refresh_token(latest_refresh_token or row.refresh_token),
+    }
 
 
 @router.post("/{mailbox_id}/hotmail/accounts/{account_id}/bind")

@@ -320,13 +320,15 @@ services/turnstile_solver/solver.log
 
 - `Dockerfile`
 - `docker-compose.yml`
+- `docker/entrypoint.sh`
 
 默认部署内容包括：
 
 - FastAPI 后端
 - 已构建的前端静态资源
-- SQLite 数据库持久化目录 `./data`
+- 挂载到 `./data` 的运行时目录
 - 随后端自动拉起的本地 Turnstile Solver
+- Sub2API / CPA 监控报告持久化
 
 ### 首次部署
 
@@ -378,17 +380,46 @@ docker compose logs -f app
 
 ### 数据持久化
 
-容器默认使用：
+Compose 默认会把宿主机目录挂载到：
 
 ```text
-DATABASE_URL=sqlite:////app/data/account_manager.db
+./data -> /runtime
 ```
 
-宿主机会挂载到：
+容器启动时会由 `docker/entrypoint.sh` 自动建立以下运行时映射：
+
+- `/runtime/account_manager.db` -> `/app/account_manager.db`
+- `/runtime/logs/solver.log` -> `/app/services/turnstile_solver/solver.log`
+- `/runtime/reports` -> `/app/reports`
+- `/runtime/smstome_used` -> `/app/smstome_used`
+
+因此默认数据库实际落盘位置是：
 
 ```text
-./data
+./data/account_manager.db
 ```
+
+如需显式覆盖，也可在 `.env` 中设置：
+
+```text
+APP_RUNTIME_BIND=/your/runtime/dir
+DATABASE_URL=sqlite:////runtime/account_manager.db
+```
+
+### `.env` 注入说明
+
+`docker-compose.yml` 已显式声明：
+
+- `env_file: .env`
+- Compose 变量替换（如 `${APP_RUNTIME_BIND:-./data}`）
+- 容器运行时环境变量
+
+因此以下两类配置都可以直接写进仓库根目录 `.env`：
+
+1. **Compose 级变量**：如 `APP_RUNTIME_BIND`、`CLIPROXYAPI_PORT_BIND`
+2. **应用级变量**：如 `SUB2API_API_URL`、`SMSTOME_COOKIE`、`gmail_alias_base_email`
+
+项目运行时还会读取仓库根目录 `.env` 作为配置回退，因此数据库里未设置的配置项，也可以直接从 `.env` 生效。
 
 ### 常用环境变量
 
@@ -396,12 +427,14 @@ DATABASE_URL=sqlite:////app/data/account_manager.db
 | --- | --- | --- |
 | `HOST` | `0.0.0.0` | FastAPI 监听地址 |
 | `PORT` | `8000` | FastAPI 监听端口 |
-| `DATABASE_URL` | `sqlite:////app/data/account_manager.db` | SQLite 数据库地址 |
+| `APP_RUNTIME_DIR` | `/runtime` | 容器内运行时目录 |
+| `APP_RUNTIME_BIND` | `./data` | 宿主机挂载到运行时目录的位置 |
+| `DATABASE_URL` | `sqlite:////runtime/account_manager.db` | SQLite 数据库地址，默认也可依赖入口脚本软链到 `/app/account_manager.db` |
 | `APP_ENABLE_SOLVER` | `1` | 是否自动启动本地 Solver，设为 `0` 可禁用 |
 | `SOLVER_PORT` | `8889` | Solver 监听端口 |
 | `LOCAL_SOLVER_URL` | `http://127.0.0.1:8889` | 后端访问 Solver 的地址 |
-
-如需传入 `SMSTOME_COOKIE`、`OPENAI_*`、`SUB2API_*`、邮件服务配置等内容，可直接写入仓库根目录 `.env` 文件，`docker compose` 会自动注入到容器环境中。
+| `CLIPROXYAPI_PORT_BIND` | `8317` | CLIProxyAPI 映射到宿主机的端口 |
+| `GROK2API_PORT_BIND` | `8011` | grok2api 映射到宿主机的端口 |
 
 ### Camoufox 构建参数
 
@@ -414,15 +447,19 @@ CAMOUFOX_VERSION=135.0.1 CAMOUFOX_RELEASE=beta.24 docker compose build app
 ### Docker 使用建议
 
 - 当前 Docker 镜像主要覆盖主应用和本地 Turnstile Solver
-- `grok2api`、`CLIProxyAPI`、`Kiro Account Manager` 的自动安装/拉起逻辑仍偏向宿主机环境
+- `grok2api`、`CLIProxyAPI`、`Kiro Account Manager` 并不会在该 Compose 中自动安装或自动启动
+- `8317` / `8011` 端口映射默认保留给宿主机已有服务按需接入；如果宿主机没有这些服务，可保持默认或在 `.env` 中改绑端口
 - 若依赖 `conda`、Go 或 Windows 可执行文件，不建议直接在当前 Linux 容器中启动这些插件
 - 如果你只需要 Web UI、账号管理、任务调度、本地 Solver、Sub2API 监控，当前 Compose 配置可直接使用
 
 ### 本次 release 部署后优先检查
 
+- `/`
+- `GET /api/accounts/stats`
+- `GET /api/solver/status`
 - `/sub2api-monitor`
 - `GET /api/sub2api-monitor/status`
-- 运行一次监控并确认 `counts.quota_exhausted` 正常显示
+- 运行一次监控并确认 `counts.quota_exhausted`、`counts.account_401`、`counts.abnormal` 正常显示
 
 ## 插件与外部依赖
 

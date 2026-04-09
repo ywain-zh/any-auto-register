@@ -1,6 +1,4 @@
 import { Card, Form, Input, Select, Switch, Typography } from 'antd'
-import { useState } from 'react'
-import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons'
 import { parseBooleanConfigValue } from '@/lib/configValueParsers'
 
 export type ProviderOption = {
@@ -89,8 +87,21 @@ export function normalizeProviderConfig(provider: MailboxProviderMeta | null | u
   provider.fields.forEach((field) => {
     if (field.type === 'boolean') {
       config[field.key] = parseBooleanConfigValue(config[field.key])
+      return
+    }
+
+    if (typeof config[field.key] === 'string') {
+      config[field.key] = config[field.key].trim()
     }
   })
+
+  if (provider.key === 'gmail_alias') {
+    const appPassword = String(config.gmail_alias_app_password || '').replace(/\s+/g, '')
+    if (appPassword && !/^[a-zA-Z]{16}$/.test(appPassword)) {
+      throw new Error('Gmail 授权密码格式不正确，应为 16 位字母')
+    }
+    config.gmail_alias_app_password = appPassword
+  }
 
   let domains: string[] = []
   let enabledDomains: string[] = []
@@ -125,7 +136,6 @@ export function normalizeProviderConfig(provider: MailboxProviderMeta | null | u
 }
 
 function ConfigField({ field }: { field: ProviderField }) {
-  const [showSecret, setShowSecret] = useState(false)
   const isBooleanField = field.type === 'boolean'
   const isTextArea = field.type === 'textarea'
 
@@ -141,14 +151,7 @@ function ConfigField({ field }: { field: ProviderField }) {
       ) : isBooleanField ? (
         <Switch checkedChildren="开启" unCheckedChildren="关闭" />
       ) : field.secret ? (
-        <Input.Password
-          placeholder={field.placeholder}
-          visibilityToggle={{
-            visible: !showSecret,
-            onVisibleChange: setShowSecret,
-          }}
-          iconRender={(visible) => (visible ? <EyeOutlined /> : <EyeInvisibleOutlined />)}
-        />
+        <Input.Password placeholder={field.placeholder} />
       ) : isTextArea ? (
         <Input.TextArea placeholder={field.placeholder} autoSize={{ minRows: 3, maxRows: 6 }} />
       ) : (

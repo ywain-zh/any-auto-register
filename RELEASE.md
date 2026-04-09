@@ -10,6 +10,63 @@
 
 ---
 
+## 2026-04-09
+
+- 发布分支：`release`
+- 开发来源：`custom/dev`
+- 发布提交：以本次 `release` 分支最新 HEAD 为准
+
+### 本次内容
+
+- 前端整体界面重做，统一为新的深色控制台风格，保留现有路由、接口与业务逻辑
+- 邮箱服务新增 Gmail Alias 方案，补充微软邮箱状态维护、令牌刷新、删除接口和相关测试
+- Codex 注册成功后补齐 access token / refresh token 等绑定结果持久化，并在账号数据中统一保存
+- Sub2API 监控新增 `401账号`、`异常` 分类与可用账号统计逻辑调整，并补充对应回归测试
+- Docker 部署说明更新为当前真实运行方式，补齐 `.env` 注入、`/runtime` 持久化目录和报告目录映射说明
+
+### 部署后重点检查
+
+- 打开首页、平台管理、邮箱服务页，确认新 UI 正常加载且接口返回正常
+- 新建一条 Codex 注册任务，确认注册成功后账号记录包含 access token / refresh token 等绑定结果
+- 打开微软邮箱页，确认列表、删除、刷新 token、查邮件和状态更新正常
+- 打开 `/sub2api-monitor` 运行一次检查，确认 `counts.quota_exhausted`、`counts.account_401`、`counts.abnormal` 与可用账号统计正常
+- Docker 部署后确认 `./data/account_manager.db`、`./data/logs/solver.log`、`./data/reports/` 持久化正常
+
+### 备注
+
+- 本次未纳入运行时文件 `codex-pool-manager/codex-pool-manager/hotmail_accounts_runtime.txt`
+- 本次未纳入运行时配置 `codex-pool-manager/codex-pool-manager/*.runtime.yaml`
+- `reports/` 目录和调试截图属于本地产物，未随本次发布提交
+
+---
+
+## 2026-04-07
+
+- 发布分支：`release`
+- 开发来源：`custom/dev`
+- 发布提交：`092cced`
+
+### 本次内容
+
+- 重构邮箱管理入口，新增独立的邮箱服务页与微软邮箱账号页，支持服务实例切换、账号导入、列表分页和查邮件
+- 后端统一邮箱服务解析与账号接口，补充 Hotmail 邮件拉取、Sub2API OAuth 绑定能力和相关测试
+- 简化注册页与账号页中的邮箱选择逻辑，改为复用统一邮箱服务实例
+- 增强 Sub2API 监控页运行反馈，补充执行中、成功、失败状态提示与错误展示
+
+### 部署后重点检查
+
+- 打开邮箱服务与微软邮箱页面，确认服务列表、账号分页、TXT 导入和查邮件功能正常
+- 发起一条注册任务，确认注册流程能正确读取所选邮箱服务并继续后续绑定流程
+- 打开 `/sub2api-monitor` 运行一次检查，确认执行状态提示、错误提示和最新报告刷新正常
+- 如使用 Sub2API OAuth 绑定，确认后端接口可正常执行并返回结果
+
+### 备注
+
+- 本次未纳入运行时文件 `codex-pool-manager/codex-pool-manager/hotmail_accounts_runtime.txt`
+- `reports/` 目录属于运行产物，未随本次发布提交
+
+---
+
 ## 2026-04-06
 
 - 发布分支：`release`

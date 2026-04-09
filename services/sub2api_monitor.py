@@ -117,9 +117,10 @@ def _normalize_account(item: Any) -> dict[str, Any]:
     }
 
 
-def _classify_test_failure(payload: Any) -> str | None:
-    text = json.dumps(payload, ensure_ascii=False) if isinstance(payload, (dict, list)) else str(payload or "")
-    lowered = text.lower()
+def _classify_failure_text(text: str) -> str | None:
+    lowered = str(text or "").lower()
+    if not lowered.strip():
+        return None
     if (
         "usage_limit_reached" in lowered
         or "the usage limit has been reached" in lowered
@@ -127,7 +128,38 @@ def _classify_test_failure(payload: Any) -> str | None:
         or ('"type": "error"' in lowered and 'api returned 429' in lowered)
     ):
         return "quota_exhausted"
+    if (
+        '"status_code":401' in lowered
+        or '"status_code": 401' in lowered
+        or '"http_status":401' in lowered
+        or '"http_status": 401' in lowered
+        or "http 401" in lowered
+        or "status code 401" in lowered
+        or "api returned 401" in lowered
+        or "unauthorized" in lowered
+        or "access_token_invalidated" in lowered
+        or "token_invalidated" in lowered
+        or "account_deactivated" in lowered
+        or "authentication token has been invalidated" in lowered
+        or "deleted or deactivated" in lowered
+    ):
+        return "account_401"
     return None
+
+
+def _classify_test_failure(payload: Any) -> str:
+    text = json.dumps(payload, ensure_ascii=False) if isinstance(payload, (dict, list)) else str(payload or "")
+    return _classify_failure_text(text) or "abnormal"
+
+
+def _build_failed_test_result(message: Any, *, raw: Any = None) -> dict[str, Any]:
+    error_text = str(message or "").strip()
+    return {
+        "ok": False,
+        "failure_type": _classify_test_failure(raw if raw is not None else error_text),
+        "message": error_text[:300],
+        "raw": raw,
+    }
 
 
 def _summarize_test_result(payload: Any) -> dict[str, Any]:
@@ -209,13 +241,14 @@ def _test_account(base_url: str, api_key: str, account_id: Any) -> dict[str, Any
 
 
 def _build_counts(accounts: list[dict[str, Any]], tested_accounts: list[dict[str, Any]], run_errors: list[dict[str, Any]]) -> dict[str, int]:
-    available = 0
     disabled = 0
     missing_tokens = 0
     expiring_soon = 0
     test_passed = 0
     test_failed = 0
     quota_exhausted = 0
+    account_401 = 0
+    abnormal = 0
     untested = 0
     now_ts = int(time.time())
 
@@ -223,9 +256,7 @@ def _build_counts(accounts: list[dict[str, Any]], tested_accounts: list[dict[str
     for account in accounts:
         if account.get("disabled"):
             disabled += 1
-        if account.get("has_access_token") and account.get("has_refresh_token"):
-            available += 1
-        else:
+        if not (account.get("has_access_token") and account.get("has_refresh_token")):
             missing_tokens += 1
 
         expires_at = account.get("expires_at")
@@ -239,8 +270,15 @@ def _build_counts(accounts: list[dict[str, Any]], tested_accounts: list[dict[str
             test_passed += 1
         else:
             test_failed += 1
-            if test_info.get("failure_type") == "quota_exhausted":
+            failure_type = str(test_info.get("failure_type") or "")
+            if failure_type == "quota_exhausted":
                 quota_exhausted += 1
+            elif failure_type == "account_401":
+                account_401 += 1
+            elif failure_type == "abnormal":
+                abnormal += 1
+
+    available = max(len(accounts) - quota_exhausted - account_401 - abnormal, 0)
 
     return {
         "total": len(accounts),
@@ -251,6 +289,8 @@ def _build_counts(accounts: list[dict[str, Any]], tested_accounts: list[dict[str
         "tested_ok": test_passed,
         "tested_failed": test_failed,
         "quota_exhausted": quota_exhausted,
+        "account_401": account_401,
+        "abnormal": abnormal,
         "untested": untested,
         "errors": len(run_errors),
     }
@@ -375,7 +415,7 @@ def run_sub2api_monitor(
                 tested_accounts.append({
                     "id": account_id,
                     "email": account.get("email"),
-                    "test": {"ok": False, "message": str(exc), "raw": None},
+                    "test": _build_failed_test_result(str(exc)),
                 })
                 run_errors.append({
                     "id": account_id,
